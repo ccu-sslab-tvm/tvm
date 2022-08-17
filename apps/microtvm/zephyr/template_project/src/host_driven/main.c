@@ -130,7 +130,9 @@ tvm_crt_error_t TVMPlatformGenerateRandom(uint8_t* buffer, size_t num_bytes) {
 }
 
 // Heap for use by TVMPlatformMemoryAllocate.
-K_HEAP_DEFINE(tvm_heap, 216 * 1024);
+#define TVM_HEAP_SIZE (8192 * 1024)
+__attribute__((section("SDRAM2"))) unsigned char tvm_heap_mem[TVM_HEAP_SIZE];
+struct k_heap tvm_heap;
 
 // Called by TVM to allocate memory.
 tvm_crt_error_t TVMPlatformMemoryAllocate(size_t num_bytes, DLDevice dev, void** out_ptr) {
@@ -260,6 +262,8 @@ void uart_rx_init(struct ring_buf* rbuf, const struct device* dev) {
 // The main function of this application.
 extern void __stdout_hook_install(int (*hook)(int));
 void main(void) {
+  unsigned int int32=0;
+  unsigned int *p32=&int32, *p32b;
 #ifdef CONFIG_LED
   int ret;
   led0_pin = device_get_binding(LED0);
@@ -274,6 +278,7 @@ void main(void) {
   gpio_pin_set(led0_pin, LED0_PIN, 1);
 #endif
 
+  k_heap_init(&tvm_heap, tvm_heap_mem, TVM_HEAP_SIZE);
   // Claim console device.
   tvm_uart = device_get_binding(DT_LABEL(DT_CHOSEN(zephyr_console)));
   uart_rx_init(&uart_rx_rbuf, tvm_uart);

@@ -389,6 +389,9 @@ class Handler(server.ProjectAPIHandler):
                 "CONFIG_RING_BUFFER=y\n"
                 "CONFIG_UART_CONSOLE=n\n"
                 "CONFIG_UART_INTERRUPT_DRIVEN=y\n"
+                "CONFIG_MAIN_STACK_SIZE=8192\n"
+                "CONFIG_MEMC=y\n"
+                "CONFIG_SYS_HEAP_BIG_ONLY=y"
                 "\n"
             )
             f.write("# For TVMPlatformAbort().\n" "CONFIG_REBOOT=y\n" "\n")
