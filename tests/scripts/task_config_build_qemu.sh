@@ -28,8 +28,9 @@ echo set\(USE_MICRO ON\) >> config.cmake
 echo set\(USE_CMSISNN ON\) >> config.cmake
 echo set\(USE_ETHOSU ON\) >> config.cmake
 echo set\(USE_PROFILER ON\) >> config.cmake
-echo set\(USE_LLVM llvm-config-10\) >> config.cmake
+echo set\(USE_LLVM llvm-config-14\) >> config.cmake
 echo set\(CMAKE_CXX_FLAGS -Werror\) >> config.cmake
 echo set\(HIDE_PRIVATE_SYMBOLS ON\) >> config.cmake
 echo set\(USE_CCACHE OFF\) >> config.cmake
 echo set\(SUMMARIZE ON\) >> config.cmake
+echo set\(USE_GRAPH_EXECUTOR_DEBUG ON\) >> config.cmake
