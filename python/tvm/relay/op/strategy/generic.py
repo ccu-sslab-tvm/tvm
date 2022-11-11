@@ -1976,3 +1976,22 @@ def conv2d_backward_weight_strategy(attrs, inputs, out_type, target):
         "conv2d_backward_weight is currently only supported with cudnn. "
         "Please run Legalize pass to decompose this op into supported ops."
     )
+
+def wrap_compute_axis_abs(topi_compute):
+    """Wrap axis_abs topi compute"""
+
+    def _compute_axis_abs(attrs, inputs, _):
+        return [topi_compute(inputs[0], attrs.axis, attrs.indice)]
+
+    return _compute_axis_abs
+
+@override_native_generic_func("axis_abs_strategy")
+def axis_abs_strategy(attrs, inputs, out_type, target):
+    """axis_abs generic strategy"""
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_axis_abs(topi.axis_abs),
+        wrap_topi_schedule(topi.generic.schedule_injective),
+        name="axix_abs.generic",
+    )
+    return strategy

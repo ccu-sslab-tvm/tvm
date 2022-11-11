@@ -1276,3 +1276,10 @@ def gather_shape_func(attrs, inputs, _):
     Shape func for gather operator.
     """
     return [_gather_shape(inputs[0], inputs[1], attrs.axis)]
+
+@_reg.register_compute("axis_abs")  # 设置算子的计算函数属性，默认的level为10
+def compute_axis_abs(attrs, inputs, output_type):
+    """Compute definition of axis_abs"""
+    return topi.axis_abs(inputs[0], attrs.axis, attrs.indice)
+
+_reg.register_strategy("axis_abs", strategy.axis_abs_strategy)

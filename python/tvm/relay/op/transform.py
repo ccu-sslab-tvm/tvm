@@ -1889,3 +1889,18 @@ def stft(
         window = _make.ones([n_fft], "int32")
 
     return _make.stft(data, n_fft, hop_length, win_length, window, normalized, onesided)
+
+def axis_abs(data, axis=0, indice=0):
+    """Computes abs of data along a certain axis indice.
+
+    Parameters
+    ----------
+    data : relay.Expr
+        The source data to be invert permuated.
+
+    Returns
+    -------
+    ret : relay.Expr
+        Invert permuated data. Has the same type as data.
+    """
+    return _make.axis_abs(data, axis, indice)
