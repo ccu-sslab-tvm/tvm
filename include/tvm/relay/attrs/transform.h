@@ -586,6 +586,15 @@ struct AxisAbsAttrs : public tvm::AttrsNode<AxisAbsAttrs> {
   }
 };
 
+/*! \brief Attributes used in MatScalMul opeator*/
+struct MatScalMulAttrs : public tvm::AttrsNode<MatScalMulAttrs> {
+  int scal;
+
+  TVM_DECLARE_ATTRS(MatScalMulAttrs, "relay.attrs.MatScalMulAttrs") {
+    TVM_ATTR_FIELD(scal).set_default(1).describe("A scalar number to multiply");
+  }
+};
+
 }  // namespace relay
 }  // namespace tvm
 #endif  // TVM_RELAY_ATTRS_TRANSFORM_H_

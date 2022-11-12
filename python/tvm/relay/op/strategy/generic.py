@@ -1995,3 +1995,18 @@ def axis_abs_strategy(attrs, inputs, out_type, target):
         name="axix_abs.generic",
     )
     return strategy
+
+def wrap_compute_mat_scal_mul(topi_compute):
+    def _compute_mat_scal_mul(attrs, inputs, _):
+        return [topi_compute(inputs[0], attrs.scal)]
+    return _compute_mat_scal_mul
+
+@override_native_generic_func("mat_scal_mul_strategy")
+def mat_scal_mul_strategy(attrs, inputs, out_type, target):
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_mat_scal_mul(topi.mat_scal_mul),
+        wrap_topi_schedule(topi.generic.schedule_injective),
+        name="mat_scal_mul.generic"
+    )
+    return strategy

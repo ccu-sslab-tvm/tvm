@@ -1283,3 +1283,9 @@ def compute_axis_abs(attrs, inputs, output_type):
     return topi.axis_abs(inputs[0], attrs.axis, attrs.indice)
 
 _reg.register_strategy("axis_abs", strategy.axis_abs_strategy)
+
+@_reg.register_compute("mat_scal_mul")
+def compute_mat_scal_mul(attrs, inputs, output_type):
+    return topi.mat_scal_mul(inputs[0], attrs.scal)
+
+_reg.register_strategy("mat_scal_mul", strategy.mat_scal_mul_strategy)

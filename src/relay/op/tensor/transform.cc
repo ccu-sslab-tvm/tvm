@@ -4274,5 +4274,37 @@ Expr MakeAxisAbs(Expr data, int axis, int indice) {
 
 TVM_REGISTER_GLOBAL("relay.op._make.axis_abs").set_body_typed(MakeAxisAbs);
 
+TVM_REGISTER_NODE_TYPE(MatScalMulAttrs);
+bool MatScalMulRel(const Array<Type>& types, int num_inputs, const Attrs& attrs, const TypeReporter& reporter) {
+  // types: [data, output]
+  ICHECK_EQ(types.size(), 2);
+  const auto* data = types[0].as<TensorTypeNode>();
+  if (data == nullptr) {
+    ICHECK(types[0].as<IncompleteTypeNode>())
+      << "cast: expect input type to be TensorType but get " << types[0];
+    return false;
+  }
+  
+  reporter->Assign(types[1], TensorType(data->shape, data->dtype));
+  return true;
+}
+
+RELAY_REGISTER_OP("mat_scal_mul")
+    .describe(R"doc(Computes the multiplication of a matrix and a scalar.)doc" TVM_ADD_FILELINE)
+    .set_num_inputs(1)
+    .add_argument("data", "Tensor", "The input tensor")
+    .set_support_level(3)
+    .add_type_rel("mat_scal_mul", MatScalMulRel)
+    .set_attr<TOpPattern>("TOpPattern", kOpaque);
+
+Expr MakeMatScalMul(Expr data, int scal) {
+  auto attrs = make_object<MatScalMulAttrs>();
+  attrs->scal = scal;
+  static const Op& op = Op::Get("mat_scal_mul");
+  return Call(op, {data}, Attrs(attrs), {});
+}
+
+TVM_REGISTER_GLOBAL("relay.op._make.mat_scal_mul").set_body_typed(MakeMatScalMul);
+
 }  // namespace relay
 }  // namespace tvm

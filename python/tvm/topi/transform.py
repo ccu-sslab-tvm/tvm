@@ -1028,3 +1028,7 @@ def axis_abs(x, axis, indice):
         return te.compute(x.shape, lambda i, j, k: te.if_then_else(x[i, j, k] >= 0, x[i, j, k], te.if_then_else(j == indice, -x[i, j, k], x[i, j, k])))
     else:
         return te.compute(x.shape, lambda i, j, k: te.if_then_else(x[i, j, k] >= 0, x[i, j, k], te.if_then_else(k == indice, -x[i, j, k], x[i, j, k])))
+
+def mat_scal_mul(data, scal):
+    assert len(data.shape) == 3
+    return te.compute(data.shape, lambda i, j, k: data[i, j, k] * scal)

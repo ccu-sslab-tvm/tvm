@@ -1904,3 +1904,6 @@ def axis_abs(data, axis=0, indice=0):
         Invert permuated data. Has the same type as data.
     """
     return _make.axis_abs(data, axis, indice)
+
+def mat_scal_mul(data, scal=1):
+    return _make.mat_scal_mul(data, scal)
