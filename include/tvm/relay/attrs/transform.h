@@ -581,8 +581,8 @@ struct AxisAbsAttrs : public tvm::AttrsNode<AxisAbsAttrs> {
   int indice;
 
   TVM_DECLARE_ATTRS(AxisAbsAttrs, "relay.attrs.AxisAbsAttrs") {
-      TVM_ATTR_FIELD(axis).set_default(0).describe("Axis to abs");
-      TVM_ATTR_FIELD(indice).set_default(0).describe("Indice to abs");
+    TVM_ATTR_FIELD(axis).set_default(0).describe("Axis to abs");
+    TVM_ATTR_FIELD(indice).set_default(0).describe("Indice to abs");
   }
 };
 
