@@ -35,48 +35,190 @@ class ExprFunctor:
 
     def __init__(self):
         self.memo_map = {}
+        self.hete_op = []
 
     # pylint: disable=no-else-return
     def visit(self, expr):
         """Apply the visitor to an expression."""
+        print("---in visit---")
         if expr in self.memo_map:
-            return self.memo_map[expr]
+            if isinstance(expr, Call):
+                print("----expr in self.memo_map call----")
+                print(self.memo_map[expr])
+                print("#######")
+                # print(self.memo_map)
+                print("-----------------------------")
+                return self.imp(self.memo_map[expr])
+                # return self.memo_map[expr]  
+            elif isinstance(expr, Op):
+                print("----expr in self.memo_map op----")
+                print(self.memo_map[expr])
+                print("#######")
+                # print(self.memo_map)
+                print("-----------------------------")
+                # return self.imp(self.memo_map[expr])
+                return self.memo_map[expr]
+            elif isinstance(expr, Var):
+                print("----expr in self.memo_map Var----")
+                print(self.memo_map[expr])
+                print("#######")
+                # print(self.memo_map)
+                return self.memo_map[expr]
 
         if isinstance(expr, Function):
+            print("isinstance Function")
             res = self.visit_function(expr)
+            print("---49---")
         elif isinstance(expr, Call):
+            print("isinstance Call")
             res = self.visit_call(expr)
         elif isinstance(expr, Let):
+            print("isinstance Let")
             res = self.visit_let(expr)
         elif isinstance(expr, Var):
+            print("isinstance Var")
             res = self.visit_var(expr)
         elif isinstance(expr, GlobalVar):
+            print("isinstance GlobalVar")
             res = self.visit_global_var(expr)
         elif isinstance(expr, If):
+            print("isinstance If")
             res = self.visit_if(expr)
         elif isinstance(expr, Tuple):
+            print("isinstance Tuple")
             res = self.visit_tuple(expr)
         elif isinstance(expr, TupleGetItem):
+            print("isinstance TupleGetItem")
             res = self.visit_tuple_getitem(expr)
         elif isinstance(expr, Constant):
+            print("isinstance Constant")
             res = self.visit_constant(expr)
         elif isinstance(expr, Op):
+            print("isinstance Op")
             res = self.visit_op(expr)
         elif isinstance(expr, RefCreate):
+            print("isinstance RefCreate")
             res = self.visit_ref_create(expr)
         elif isinstance(expr, RefRead):
+            print("isinstance RefRead")
             res = self.visit_ref_read(expr)
         elif isinstance(expr, RefWrite):
+            print("isinstance RefWrite")
             res = self.visit_ref_write(expr)
         elif isinstance(expr, Constructor):
+            print("isinstance Constructor")
             res = self.visit_constructor(expr)
         elif isinstance(expr, Match):
+            print("isinstance Match")
             res = self.visit_match(expr)
         else:
             raise Exception("warning unhandled case: {0}".format(type(expr)))
 
         self.memo_map[expr] = res
+        print('---return res out visit---')
+        print(res)
+        print("#####")
+        # print(self.memo_map)
+        print('--------------------------')
+        if isinstance(expr, Call):
+            return self.imp(res)
+        else:
+            return res
 
+    def visit_1(self, expr):
+        """Apply the visitor to an expression."""
+        print("---in visit_1---")
+        if expr in self.memo_map:
+            print("-----in visit_1 expr in memo------")
+            if isinstance(expr, Call):
+                print("----expr in self.memo_map call----")
+                # print(type(expr))
+                print(self.memo_map[expr])
+                print("#######")
+                # print(self.memo_map)
+                print("-----------------------------")
+                # return self.memo_map[expr]
+                return self.ext_tmp(self.memo_map[expr])
+            elif isinstance(expr,Op):
+                print("----expr in self.memo_map op----")
+                # print(type(expr))
+                print(self.memo_map[expr])
+                print("#######")
+                # print(self.memo_map)
+                print("-----------------------------")
+                # return self.imp(self.memo_map[expr])
+                return self.ext(self.memo_map[expr])
+                # return self.memo_map[expr]
+            elif isinstance(expr, Var):
+                print("----expr in self.memo_map var----")
+                print(self.memo_map[expr])
+                print("#######")
+                # print(self.memo_map)
+                return self.ext(self.memo_map[expr])
+
+        if isinstance(expr, Function):
+            print("isinstance Function")
+            res = self.visit_function(expr)
+            print("49")
+        elif isinstance(expr, Call):
+            print("isinstance Call")
+            res = self.visit_call_1(expr)
+            # self.memo_map[res] = res
+            # print('--return res out visit_1 call--')
+            # print(res)
+            # print("#####")
+            # print(self.memo_map)
+            # print('-------------------------')
+            return res
+        elif isinstance(expr, Let):
+            print("isinstance Let")
+            res = self.visit_let(expr)
+        elif isinstance(expr, Var):
+            print("isinstance Var")
+            res = self.visit_var(expr)
+        elif isinstance(expr, GlobalVar):
+            print("isinstance GlobalVar")
+            res = self.visit_global_var(expr)
+        elif isinstance(expr, If):
+            print("isinstance If")
+            res = self.visit_if(expr)
+        elif isinstance(expr, Tuple):
+            print("isinstance Tuple")
+            res = self.visit_tuple(expr)
+        elif isinstance(expr, TupleGetItem):
+            print("isinstance TupleGetItem")
+            res = self.visit_tuple_getitem(expr)
+        elif isinstance(expr, Constant):
+            print("isinstance Constant")
+            res = self.visit_constant(expr)
+        elif isinstance(expr, Op):
+            print("isinstance Op")
+            res = self.visit_op(expr)
+        elif isinstance(expr, RefCreate):
+            print("isinstance RefCreate")
+            res = self.visit_ref_create(expr)
+        elif isinstance(expr, RefRead):
+            print("isinstance RefRead")
+            res = self.visit_ref_read(expr)
+        elif isinstance(expr, RefWrite):
+            print("isinstance RefWrite")
+            res = self.visit_ref_write(expr)
+        elif isinstance(expr, Constructor):
+            print("isinstance Constructor")
+            res = self.visit_constructor(expr)
+        elif isinstance(expr, Match):
+            print("isinstance Match")
+            res = self.visit_match(expr)
+        else:
+            raise Exception("warning unhandled case: {0}".format(type(expr)))
+
+        self.memo_map[expr] = res
+        print('--return res out visit_1--')
+        print(expr)
+        print(res)
+        print("#####")
+        # print(self.memo_map)
+        print('-------------------------')
         return res
 
     def visit_function(self, _):
@@ -203,7 +345,13 @@ class ExprMutator(ExprFunctor):
 
     def visit_function(self, fn):
         new_params = [self.visit(x) for x in fn.params]
+        print("------304 new_params-------")
+        print(new_params)
+        print("-------------")
         new_body = self.visit(fn.body)
+        print("-------308 new_body------")
+        print(new_body)
+        print("-------------")
         return Function(list(new_params), new_body, fn.ret_type, fn.type_params, fn.attrs)
 
     def visit_let(self, let):
@@ -213,11 +361,30 @@ class ExprMutator(ExprFunctor):
         return Let(new_var, new_val, new_body)
 
     def visit_call(self, call):
+        print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+        print(call)
         new_fn = self.visit(call.op)
-        new_args = [self.visit(arg) for arg in call.args]
-        return Call(new_fn, new_args, call.attrs, call.type_args, call.span)
+        print("---325 new_fn---")
+        print(new_fn)
+        print("-------")
+        if new_fn in self.hete_op:
+            new_args = [self.visit_1(arg) for arg in call.args]
+            print("---in if new_args---")
+            print(new_args)
+            print("-------")
+            return Call(new_fn, new_args, call.attrs, call.type_args, call.span)
+        else:
+            new_args = [self.visit(arg) for arg in call.args]
+            print("---in else new_args---")
+            print(new_args)
+            print(Call(new_fn, new_args, call.attrs, call.type_args, call.span))
+            print("-------")
+            return Call(new_fn, new_args, call.attrs, call.type_args, call.span)
 
     def visit_var(self, var):
+        print("---342---")
+        print(var)
+        print('-------')
         return var
 
     def visit_global_id(self, global_var):
@@ -239,6 +406,9 @@ class ExprMutator(ExprFunctor):
         return gvar
 
     def visit_op(self, op):
+        print("---366---")
+        print(op)
+        print('-------')
         return op
 
     def visit_constant(self, const):
