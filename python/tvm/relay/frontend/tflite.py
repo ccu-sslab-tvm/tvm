@@ -53,6 +53,8 @@ class OperatorConverter(object):
     """Operator Converted for converting TFLite ops to Relay ops"""
 
     def __init__(self, model, subgraph, exp_tab):
+        
+        print("開始轉換 tflite 中的 operator 到 relay 形式")
 
         try:
             from tflite.ActivationFunctionType import ActivationFunctionType
@@ -180,11 +182,15 @@ class OperatorConverter(object):
 
     def check_unsupported_ops(self):
         """Check unsupported TFLite ops in our converter."""
+        
+        print('從所有 operator 取得其 name ，用於檢查 TVM 是否支援')
+
         unsupported_ops_set = set()
         dynamic_range_ops_set = set()
         for op_idx in range(self.subgraph.OperatorsLength()):
             op = self.subgraph.Operators(op_idx)
             op_code_str = self.get_op_code_str(op)
+            print(op_code_str)
             if op_code_str not in self.convert_map:
                 unsupported_ops_set.add(op_code_str)
                 continue
@@ -3850,6 +3856,7 @@ def _decode_type(n):
 
 
 def _input_type(model):
+    print('取得 model 輸入 shape_dic 與 dtype_dict')
     subgraph_count = model.SubgraphsLength()
     assert subgraph_count > 0
     shape_dict = {}
@@ -3910,18 +3917,24 @@ def from_tflite(model, shape_dict=None, dtype_dict=None, op_converter=OperatorCo
         assert isinstance(model, tflite.Model.Model)
 
     _shape_dict, _dtype_dict = _input_type(model)
+    print('從 model 抓取 input shape:', _shape_dict, _dtype_dict)
     if shape_dict is not None:
+        print('替換成手動提供的 shape_dict 參數:', shape_dict)
         _shape_dict.update(shape_dict)
     if dtype_dict is not None:
+        print('替換成手動提供的 dtype_dict 參數:', dtype_dict)
         _dtype_dict.update(dtype_dict)
+    print('最終將使用的 input shape:',_shape_dict, _dtype_dict)
 
     # keep the same as tflite
     assert model.SubgraphsLength() == 1, "only support one subgraph (main subgraph)"
     subgraph = model.Subgraphs(0)
 
     # model inputs / outputs
-    model_inputs = subgraph.InputsAsNumpy()
-    model_outputs = subgraph.OutputsAsNumpy()
+    model_inputs = subgraph.InputsAsNumpy() # input nodes 的 locations
+    model_outputs = subgraph.OutputsAsNumpy() # output nodes 的 locations
+    print('model_inputs: ', model_inputs)
+    print('model_outputs: ', model_outputs)
 
     exp_tab = ExprTable()
     for model_input in model_inputs:
@@ -3929,6 +3942,7 @@ def from_tflite(model, shape_dict=None, dtype_dict=None, op_converter=OperatorCo
         shape = _shape_dict[model_input_name] if model_input_name in _shape_dict else None
         dtype = _dtype_dict[model_input_name] if model_input_name in _dtype_dict else "float32"
         exp_tab.set_expr(model_input_name, _expr.var(model_input_name, shape=shape, dtype=dtype))
+        print('input info:', model_input_name, shape, dtype)
 
     # op code in model
     op_converter = op_converter(model, subgraph, exp_tab)
@@ -3950,4 +3964,5 @@ def from_tflite(model, shape_dict=None, dtype_dict=None, op_converter=OperatorCo
     )
     func = _function.Function(analysis.free_vars(outputs), outputs, attrs=attrs)
     mod = IRModule.from_expr(func)
+    print(mod)
     return mod, params
