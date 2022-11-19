@@ -719,5 +719,41 @@ RELAY_REGISTER_OP("variance")
     .set_attr<FInferCorrectLayout>("FInferCorrectLayout", ReduceInferCorrectLayout<VarianceAttrs>)
     .set_attr<TOpPattern>("TOpPattern", kCommReduce);
 
+bool MatMatMulRel(const Array<Type>& types, int num_inputs, const Attrs& attrs, const TypeReporter& reporter) {
+  // types: [data, data, result]
+  ICHECK_EQ(types.size(), 3);
+  ICHECK_EQ(num_inputs, 2);
+  const auto* mat1 = types[0].as<TensorTypeNode>();
+  const auto* mat2 = types[1].as<TensorTypeNode>();
+  if (mat1 == nullptr) {
+    ICHECK(types[0].as<IncompleteTypeNode>())
+        << "cast: expect input type to be TensorType but get " << types[0];
+    return false;
+  }
+  if (mat2 == nullptr) {
+    ICHECK(types[1].as<IncompleteTypeNode>())
+        << "cast: expect input type to be TensorType but get " << types[1];
+    return false;
+  }
+
+  reporter->Assign(types[2], TensorType({mat1->shape[0], mat2->shape[1]}, mat1->dtype));
+  return true;
+}
+
+RELAY_REGISTER_OP("mat_mat_mul")
+    .describe(R"doc(Matrix Multiplication)doc" TVM_ADD_FILELINE)
+    .set_num_inputs(2)
+    .add_argument("data", "Tensor", "The input tensor")
+    .set_support_level(3)
+    .add_type_rel("mat_mat_mul", MatMatMulRel)
+    .set_attr<TOpPattern>("TOpPattern", kOpaque);
+  
+Expr MakeMatMatMul(Expr mat1, Expr mat2) {
+    static const Op& op = Op::Get("mat_mat_mul");
+    return Call(op, {mat1, mat2}, {}, {}); // 会创建一个CallNode实例
+}
+
+TVM_REGISTER_GLOBAL("relay.op._make.mat_mat_mul").set_body_typed(MakeMatMatMul);
+
 }  // namespace relay
 }  // namespace tvm

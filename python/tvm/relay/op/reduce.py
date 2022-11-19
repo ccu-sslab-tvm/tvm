@@ -531,3 +531,6 @@ def logsumexp(data, axis=None, keepdims=False):
     if not keepdims:
         out_x = squeeze(out_x, axis)
     return out_x
+
+def mat_mat_mul(mat1, mat2):
+    return _make.mat_mat_mul(mat1, mat2)

@@ -17,6 +17,7 @@
 # pylint: disable=redefined-builtin,consider-using-enumerate,no-member
 """Reduce operators"""
 from __future__ import absolute_import as _abs
+from tvm import te
 from . import cpp
 
 
@@ -248,3 +249,9 @@ def prod(data, axis=None, keepdims=False):
     ret : tvm.te.Tensor
     """
     return cpp.prod(data, axis, keepdims)
+
+def mat_mat_mul(mat1, mat2):
+    assert mat1.shape[1] == mat2.shape[0]
+    
+    k = te.reduce_axis((0, mat1.shape[1]))
+    return te.compute((mat1.shape[0], mat2.shape[1]), lambda i, j: te.sum(mat1[i, k] * mat2[k, j], axis=k))

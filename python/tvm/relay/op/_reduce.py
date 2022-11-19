@@ -17,10 +17,12 @@
 """Backend compiler related feature registration"""
 from __future__ import absolute_import
 
+from tvm import topi
 from tvm.runtime import convert
 from tvm.te.hybrid import script
 from tvm.topi.utils import get_const_int, get_const_tuple
 from . import op as _reg
+from . import strategy
 
 _reg.register_reduce_schedule("argmax")
 _reg.register_reduce_schedule("argmin")
@@ -98,3 +100,9 @@ _reg.register_shape_func("min", False, reduce_shape_func)
 _reg.register_shape_func("prod", False, reduce_shape_func)
 _reg.register_shape_func("mean", False, reduce_shape_func)
 _reg.register_shape_func("variance", False, reduce_shape_func)
+
+@_reg.register_compute("mat_mat_mul")
+def compute_mat_mat_mul(attrs, inputs, output_type):
+    return topi.mat_mat_mul(inputs[0], inputs[1])
+
+_reg.register_strategy("mat_mat_mul", strategy.mat_mat_mul_strategy)

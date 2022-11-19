@@ -2010,3 +2010,20 @@ def mat_scal_mul_strategy(attrs, inputs, out_type, target):
         name="mat_scal_mul.generic"
     )
     return strategy
+def wrap_compute_mat_mat_mul(topi_compute):
+    """Wrap axis_abs topi compute"""
+
+    def _compute_mat_mat_mul(attrs, inputs, _):
+        return [topi_compute(inputs[0], inputs[1])]
+
+    return _compute_mat_mat_mul
+
+@override_native_generic_func("mat_mat_mul_strategy")
+def mat_mat_mul_strategy(attrs, inputs, out_type, target):
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_mat_mat_mul(topi.mat_mat_mul),
+        wrap_topi_schedule(topi.generic.schedule_injective),
+        name="mat_mat_mul.generic"
+    )
+    return strategy
