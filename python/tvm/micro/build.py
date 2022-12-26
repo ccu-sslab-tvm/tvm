@@ -24,6 +24,9 @@ import pathlib
 import contextlib
 import enum
 
+import tvm
+from . import _ffi_api
+
 from typing import Union
 from .._ffi import libinfo
 from .. import rpc as _rpc
@@ -159,3 +162,46 @@ def autotvm_build_func():
 
 # A sentinel value for the output format.
 autotvm_build_func.output_format = ".model-library-format"
+
+
+@tvm._ffi.register_object("auto_scheduler.ModuleLoader")
+class AutoSchedulerModuleLoader:
+    
+    def __init__(self, template_project_dir: str, project_options: dict = None):
+        self.__init_handle_by_constructor__(
+            _ffi_api.AutoSchedulerModuleLoader,
+            template_project_dir,
+            project_options
+        )
+    
+    @tvm.register_func("auto_scheduler.ModuleLoader.get_remote")
+    def get_remote(self, device_key, host, port, priority, timeout, build_result):
+        with open(build_result.filename, "rb") as build_file:
+            build_result_bin = build_file.read()
+
+        tracker = _rpc.connect_tracker(host, port)
+        remote = tracker.request(
+            device_key,
+            priority=priority,
+            session_timeout=timeout,
+            session_constructor_args=[
+                "tvm.micro.compile_and_create_micro_session",
+                build_result_bin,
+                self._template_project_dir,
+                json.dumps(self._project_options),
+            ],
+        )
+        self.remote = remote
+
+    @tvm.register_func("auto_scheduler.ModuleLoader.get_sys_lib")
+    def get_sys_lib(self):
+        system_lib = self.remote.get_function("runtime.SystemLib")()
+        self.system_lib = system_lib
+
+@tvm._ffi.register_func("micro.auto_scheduler.build_func")
+def auto_scheduler_build_func():
+    """A dummy build function which causes autotvm to use a different export format."""
+
+
+# A sentinel value for the output format.
+auto_scheduler_build_func.output_format = ".model-library-format"

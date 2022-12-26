@@ -105,6 +105,29 @@ MeasureResult MeasureResultNode::copy() const {
   return MeasureResult(node);
 }
 
+/********** AutoSchedulerModuleLoader **********/
+AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir, std::map<String, std::_Any_data> project_options) {
+  auto node = make_object<AutoSchedulerModuleLoaderNode>();
+  node->template_project_dir = template_project_dir;
+  node->project_options = project_options;
+  data_ = std::move(node);
+}
+
+void get_remote(String device_key, String host, int port, int priority, int timeout, 
+                const Array<BuildResult>& build_results) {
+  if (const auto* f = runtime::Registry::Get("auto_scheduler.ModuleLoader.get_remote")) {
+    (*f)(device_key, host, port, priority, timeout, build_results);
+    return;
+  }
+}
+
+void get_sys_lib() {
+  if (const auto* f = runtime::Registry::Get("auto_scheduler.ModuleLoader.get_sys_lib")) {
+    (*f)();
+    return;
+  }
+}
+
 /********** LocalBuilder **********/
 LocalBuilder::LocalBuilder(int timeout, int n_parallel, const String& build_func) {
   auto node = make_object<LocalBuilderNode>();

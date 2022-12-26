@@ -335,6 +335,26 @@ class ProgramRunner : public ObjectRef {
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ProgramRunner, ObjectRef, ProgramRunnerNode);
 };
 
+//Implementation of AutoTvmModuleLoader
+class AutoSchedulerModuleLoaderNode : public Object {
+ public:
+  String template_project_dir;
+  std::map<String, std::_Any_data> project_options;
+
+  void get_remote(String device_key, String host, int port, int priority, int timeout, 
+                  const Array<BuildResult>& build_results);
+  void get_sys_lib();
+
+  static constexpr const char* _type_key = "auto_scheduler.ProgramRunner";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ProgramRunnerNode, Object);
+};
+
+class AutoSchedulerModuleLoader : public ObjectRef {
+ public:
+  AutoSchedulerModuleLoader(String template_project_dir, std::map<String, std::_Any_data> project_options);
+  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(AutoSchedulerModuleLoader, ObjectRef, AutoSchedulerModuleLoaderNode);
+};
+
 // Implementation of various builders and runners
 
 /*! \brief LocalBuilder use local CPU cores to build programs in parallel */
