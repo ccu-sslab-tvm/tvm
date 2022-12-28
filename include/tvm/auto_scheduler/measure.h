@@ -271,11 +271,19 @@ class AutoSchedulerModuleLoaderNode : public Object {
   bool verbose;
   String project_type;
 
+  void VisitAttrs(tvm::AttrVisitor* v) {
+    v->Visit("template_project_dir", &template_project_dir);
+    v->Visit("zephyr_board", &zephyr_board);
+    v->Visit("west_cmd", &west_cmd);
+    v->Visit("verbose", &verbose);
+    v->Visit("project_type", &project_type);
+  }
+
   void get_remote(String device_key, String host, int port, int priority, int timeout, 
                   const Array<BuildResult>& build_results);
   void get_sys_lib();
 
-  static constexpr const char* _type_key = "auto_scheduler.ModuleLoader";
+  static constexpr const char* _type_key = "micro.AutoSchedulerModuleLoader";
   TVM_DECLARE_FINAL_OBJECT_INFO(AutoSchedulerModuleLoaderNode, Object);
 };
 

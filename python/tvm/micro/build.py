@@ -26,6 +26,7 @@ import enum
 
 import tvm
 from . import _ffi_api
+from tvm.runtime import Object
 
 from typing import Union
 from .._ffi import libinfo
@@ -164,8 +165,8 @@ def autotvm_build_func():
 autotvm_build_func.output_format = ".model-library-format"
 
 
-@tvm._ffi.register_object("auto_scheduler.ModuleLoader")
-class AutoSchedulerModuleLoader:
+@tvm._ffi.register_object("micro.AutoSchedulerModuleLoader")
+class AutoSchedulerModuleLoader(Object):
     
     def __init__(self, template_project_dir: str, zephyr_board: str, west_cmd: str, verbose: bool, project_type:str):#project_options: dict = None):
         self.__init_handle_by_constructor__(
@@ -176,7 +177,7 @@ class AutoSchedulerModuleLoader:
             verbose,
             project_type,
         )
-    @tvm.register_func("auto_scheduler.ModuleLoader.get_remote")
+    @tvm.register_func("micro.AutoSchedulerModuleLoader.get_remote")
     def get_remote(self, device_key, host, port, priority, timeout, build_result):
         with open(build_result.filename, "rb") as build_file:
             build_result_bin = build_file.read()
@@ -195,12 +196,12 @@ class AutoSchedulerModuleLoader:
         )
         self.remote = remote
 
-    @tvm.register_func("auto_scheduler.ModuleLoader.get_sys_lib")
+    @tvm.register_func("micro.AutoSchedulerModuleLoader.get_sys_lib")
     def get_sys_lib(self):
         system_lib = self.remote.get_function("runtime.SystemLib")()
         self.system_lib = system_lib
 
-@tvm._ffi.register_func("micro.auto_scheduler.build_func")
+@tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.build_func")
 def auto_scheduler_build_func():
     """A dummy build function which causes autotvm to use a different export format."""
 

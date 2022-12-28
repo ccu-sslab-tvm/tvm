@@ -37,6 +37,7 @@ namespace auto_scheduler {
 TVM_REGISTER_NODE_TYPE(MeasureInputNode);
 TVM_REGISTER_NODE_TYPE(BuildResultNode);
 TVM_REGISTER_NODE_TYPE(MeasureResultNode);
+TVM_REGISTER_NODE_TYPE(AutoSchedulerModuleLoaderNode);
 TVM_REGISTER_OBJECT_TYPE(MeasureCallbackNode);
 TVM_REGISTER_OBJECT_TYPE(PythonBasedMeasureCallbackNode);
 TVM_REGISTER_OBJECT_TYPE(ProgramRunnerNode);
@@ -45,7 +46,6 @@ TVM_REGISTER_OBJECT_TYPE(ProgramMeasurerNode);
 TVM_REGISTER_OBJECT_TYPE(LocalBuilderNode);
 TVM_REGISTER_OBJECT_TYPE(LocalRunnerNode);
 TVM_REGISTER_OBJECT_TYPE(RPCRunnerNode);
-TVM_REGISTER_OBJECT_TYPE(AutoSchedulerModuleLoaderNode);
 
 static const char* ErrorNoToStr[] = {
     "NoError",
@@ -119,14 +119,14 @@ AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir
 
 void get_remote(String device_key, String host, int port, int priority, int timeout, 
                 const Array<BuildResult>& build_results) {
-  if (const auto* f = runtime::Registry::Get("auto_scheduler.ModuleLoader.get_remote")) {
+  if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.get_remote")) {
     (*f)(device_key, host, port, priority, timeout, build_results);
     return;
   }
 }
 
 void get_sys_lib() {
-  if (const auto* f = runtime::Registry::Get("auto_scheduler.ModuleLoader.get_sys_lib")) {
+  if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.get_sys_lib")) {
     (*f)();
     return;
   }
@@ -424,7 +424,7 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ProgramMeasurer")
       return ProgramMeasurer(builder, runner, callbacks, verbose, max_continuous_error);
     });
 
-TVM_REGISTER_GLOBAL("auto_scheduler.ModuleLoader")
+TVM_REGISTER_GLOBAL("micro.AutoSchedulerModuleLoader")
     .set_body_typed([](String template_project_dir, String zephyr_board, String west_cmd, bool verbose, String project_type) {//std::map<String, std::_Any_data> project_options) {
       return AutoSchedulerModuleLoader(template_project_dir, zephyr_board, west_cmd, verbose, project_type);
     });

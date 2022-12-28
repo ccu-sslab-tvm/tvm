@@ -554,6 +554,7 @@ class LocalRPCMeasureContext:
         cooldown_interval=0.0,
         enable_cpu_cache_flush=False,
         device=0,
+        moduler_loader=None,
     ):
         # pylint: disable=import-outside-toplevel
         from tvm.rpc.server import Server
@@ -581,6 +582,7 @@ class LocalRPCMeasureContext:
             cooldown_interval,
             enable_cpu_cache_flush,
             device,
+            moduler_loader
         )
         # Wait for the processes to start
         time.sleep(0.5)
@@ -1089,8 +1091,6 @@ def _rpc_run(
     error_no = 0
     error_msg = None
     try:
-        if(module_loader==None):
-            print("#####################MoudleLoader None#####################")
         # upload built module
         remote = request_remote(key, host, port, priority, timeout)
         remote.upload(build_res.filename)
