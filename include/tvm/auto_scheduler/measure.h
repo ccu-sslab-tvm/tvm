@@ -261,6 +261,30 @@ class PythonBasedMeasureCallback : public MeasureCallback {
                                         PythonBasedMeasureCallbackNode);
 };
 
+// Implementation of AutoTvmModuleLoader
+
+class AutoSchedulerModuleLoaderNode : public Object {
+ public:
+  String template_project_dir;
+  String zephyr_board;
+  String west_cmd;
+  bool verbose;
+  String project_type;
+
+  void get_remote(String device_key, String host, int port, int priority, int timeout, 
+                  const Array<BuildResult>& build_results);
+  void get_sys_lib();
+
+  static constexpr const char* _type_key = "auto_scheduler.ModuleLoader";
+  TVM_DECLARE_FINAL_OBJECT_INFO(AutoSchedulerModuleLoaderNode, Object);
+};
+
+class AutoSchedulerModuleLoader : public ObjectRef {
+ public:
+  AutoSchedulerModuleLoader(String template_project_dir, String zephyr_board, String west_cmd, bool verbose, String project_type);
+  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(AutoSchedulerModuleLoader, ObjectRef, AutoSchedulerModuleLoaderNode);
+};
+
 // The base class of ProgramBuilders and ProgramRunners.
 
 /*! \brief ProgramBuilder that builds the programs */
@@ -311,6 +335,8 @@ class ProgramRunnerNode : public Object {
   /*! \brief Which device to run on if multiple are avaialble. */
   int device;
 
+  AutoSchedulerModuleLoader module_loader;
+
   /*!
    * \brief Run measurement and return results.
    * \param inputs An Array of MeasureInput.
@@ -333,26 +359,6 @@ class ProgramRunnerNode : public Object {
 class ProgramRunner : public ObjectRef {
  public:
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ProgramRunner, ObjectRef, ProgramRunnerNode);
-};
-
-//Implementation of AutoTvmModuleLoader
-class AutoSchedulerModuleLoaderNode : public Object {
- public:
-  String template_project_dir;
-  std::map<String, std::_Any_data> project_options;
-
-  void get_remote(String device_key, String host, int port, int priority, int timeout, 
-                  const Array<BuildResult>& build_results);
-  void get_sys_lib();
-
-  static constexpr const char* _type_key = "auto_scheduler.ProgramRunner";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ProgramRunnerNode, Object);
-};
-
-class AutoSchedulerModuleLoader : public ObjectRef {
- public:
-  AutoSchedulerModuleLoader(String template_project_dir, std::map<String, std::_Any_data> project_options);
-  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(AutoSchedulerModuleLoader, ObjectRef, AutoSchedulerModuleLoaderNode);
 };
 
 // Implementation of various builders and runners
@@ -470,7 +476,7 @@ class RPCRunner : public ProgramRunner {
    */
   RPCRunner(const String& key, const String& host, int port, int priority, int n_parallel,
             int timeout, int number, int repeat, int min_repeat_ms, double cooldown_interval,
-            bool enable_cpu_cache_flush, int device);
+            bool enable_cpu_cache_flush, int device, AutoSchedulerModuleLoader module_loader);
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(RPCRunner, ProgramRunner, RPCRunnerNode);
 };

@@ -167,13 +167,15 @@ autotvm_build_func.output_format = ".model-library-format"
 @tvm._ffi.register_object("auto_scheduler.ModuleLoader")
 class AutoSchedulerModuleLoader:
     
-    def __init__(self, template_project_dir: str, project_options: dict = None):
+    def __init__(self, template_project_dir: str, zephyr_board: str, west_cmd: str, verbose: bool, project_type:str):#project_options: dict = None):
         self.__init_handle_by_constructor__(
             _ffi_api.AutoSchedulerModuleLoader,
             template_project_dir,
-            project_options
+            zephyr_board,
+            west_cmd,
+            verbose,
+            project_type,
         )
-    
     @tvm.register_func("auto_scheduler.ModuleLoader.get_remote")
     def get_remote(self, device_key, host, port, priority, timeout, build_result):
         with open(build_result.filename, "rb") as build_file:

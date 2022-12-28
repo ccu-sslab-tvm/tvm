@@ -45,6 +45,7 @@ TVM_REGISTER_OBJECT_TYPE(ProgramMeasurerNode);
 TVM_REGISTER_OBJECT_TYPE(LocalBuilderNode);
 TVM_REGISTER_OBJECT_TYPE(LocalRunnerNode);
 TVM_REGISTER_OBJECT_TYPE(RPCRunnerNode);
+TVM_REGISTER_OBJECT_TYPE(AutoSchedulerModuleLoaderNode);
 
 static const char* ErrorNoToStr[] = {
     "NoError",
@@ -106,10 +107,13 @@ MeasureResult MeasureResultNode::copy() const {
 }
 
 /********** AutoSchedulerModuleLoader **********/
-AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir, std::map<String, std::_Any_data> project_options) {
+AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir, String zephyr_board, String west_cmd, bool verbose, String project_type) {
   auto node = make_object<AutoSchedulerModuleLoaderNode>();
   node->template_project_dir = template_project_dir;
-  node->project_options = project_options;
+  node->zephyr_board = zephyr_board;
+  node->west_cmd = west_cmd;
+  node->verbose = verbose;
+  node->project_type = project_type;
   data_ = std::move(node);
 }
 
@@ -179,7 +183,8 @@ Array<MeasureResult> LocalRunnerNode::Run(const Array<MeasureInput>& inputs,
 /********** RPCRunner **********/
 RPCRunner::RPCRunner(const String& key, const String& host, int port, int priority, int n_parallel,
                      int timeout, int number, int repeat, int min_repeat_ms,
-                     double cooldown_interval, bool enable_cpu_cache_flush, int device) {
+                     double cooldown_interval, bool enable_cpu_cache_flush, int device, 
+                     AutoSchedulerModuleLoader module_loader) {
   auto node = make_object<RPCRunnerNode>();
   node->key = key;
   node->host = host;
@@ -193,6 +198,7 @@ RPCRunner::RPCRunner(const String& key, const String& host, int port, int priori
   node->cooldown_interval = cooldown_interval;
   node->enable_cpu_cache_flush = enable_cpu_cache_flush;
   node->device = device;
+  node->module_loader = module_loader;
   data_ = std::move(node);
 }
 
@@ -201,7 +207,7 @@ Array<MeasureResult> RPCRunnerNode::Run(const Array<MeasureInput>& inputs,
   if (const auto* f = runtime::Registry::Get("auto_scheduler.rpc_runner.run")) {
     Array<MeasureResult> results =
         (*f)(inputs, build_results, key, host, port, priority, n_parallel, timeout, number, repeat,
-             min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, verbose, device);
+             min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, verbose, device, module_loader);
     return results;
   } else {
     LOG(FATAL) << "auto_scheduler.rpc_runner.run is not registered. "
@@ -418,6 +424,11 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ProgramMeasurer")
       return ProgramMeasurer(builder, runner, callbacks, verbose, max_continuous_error);
     });
 
+TVM_REGISTER_GLOBAL("auto_scheduler.ModuleLoader")
+    .set_body_typed([](String template_project_dir, String zephyr_board, String west_cmd, bool verbose, String project_type) {//std::map<String, std::_Any_data> project_options) {
+      return AutoSchedulerModuleLoader(template_project_dir, zephyr_board, west_cmd, verbose, project_type);
+    });
+
 TVM_REGISTER_GLOBAL("auto_scheduler.ProgramBuilderBuild")
     .set_body_typed([](const ProgramBuilder& builder, const Array<MeasureInput>& inputs,
                        int verbose) { return builder->Build(inputs, verbose); });
@@ -442,9 +453,9 @@ TVM_REGISTER_GLOBAL("auto_scheduler.LocalRunner")
 TVM_REGISTER_GLOBAL("auto_scheduler.RPCRunner")
     .set_body_typed([](const String& key, const String& host, int port, int priority,
                        int n_parallel, int timeout, int number, int repeat, int min_repeat_ms,
-                       double cooldown_interval, bool enable_cpu_cache_flush, int device) {
+                       double cooldown_interval, bool enable_cpu_cache_flush, int device, AutoSchedulerModuleLoader module_loader) {
       return RPCRunner(key, host, port, priority, n_parallel, timeout, number, repeat,
-                       min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, device);
+                       min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, device, module_loader);
     });
 
 }  // namespace auto_scheduler

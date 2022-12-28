@@ -472,6 +472,7 @@ class RPCRunner(ProgramRunner):
         cooldown_interval=0.0,
         enable_cpu_cache_flush=False,
         device=0,
+        module_loader=None,
     ):
         self.__init_handle_by_constructor__(
             _ffi_api.RPCRunner,
@@ -487,6 +488,7 @@ class RPCRunner(ProgramRunner):
             cooldown_interval,
             enable_cpu_cache_flush,
             device,
+            module_loader,
         )
 
         if check_remote(key, host, port, priority, timeout):
@@ -1080,12 +1082,15 @@ def _rpc_run(
     enable_cpu_cache_flush,
     verbose,
     device,
+    module_loader,
 ):
     inp = MeasureInput.deserialize(inp_serialized)
     tic = time.time()
     error_no = 0
     error_msg = None
     try:
+        if(module_loader==None):
+            print("#####################MoudleLoader None#####################")
         # upload built module
         remote = request_remote(key, host, port, priority, timeout)
         remote.upload(build_res.filename)
@@ -1179,7 +1184,7 @@ def _rpc_run_worker(args):
     res : MeasureResult
         The measure result of this Runner thread.
     """
-    _, build_res, _, _, _, _, _, timeout, _, _, _, _, _, verbose, _ = args
+    _, build_res, _, _, _, _, _, timeout, _, _, _, _, _, verbose, _, _ = args
     if build_res.error_no != MeasureErrorNo.NO_ERROR:
         return (
             (MAX_FLOAT,),
@@ -1223,6 +1228,7 @@ def rpc_runner_run(
     enable_cpu_cache_flush=False,
     verbose=1,
     device=0,
+    module_loader=None
 ):
     """Run function of RPCRunner to test the performance of the input BuildResults.
 
@@ -1301,6 +1307,7 @@ def rpc_runner_run(
                 enable_cpu_cache_flush,
                 verbose,
                 device,
+                module_loader,
             )
             for inp, build_res in zip(inputs, build_results)
         ],
