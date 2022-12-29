@@ -1091,19 +1091,11 @@ def _rpc_run(
     error_no = 0
     error_msg = None
     try:
-        ##################### use module_loader here #####################
-        if module_loader != None:
-            module_loader.get_remote()
-            module_loader.get_sys_lib()
-            remote = module_loader.remote
-            func = module_loader.system_lib
-            dev = remote.device(str(inp.task.target))
-        else:
-            # upload built module
-            remote = request_remote(key, host, port, priority, timeout)
-            remote.upload(build_res.filename)
-            func = remote.load_module(os.path.split(build_res.filename)[1])
-            dev = remote.device(str(inp.task.target), device)
+        # upload built module
+        remote = request_remote(key, host, port, priority, timeout)
+        remote.upload(build_res.filename)
+        func = remote.load_module(os.path.split(build_res.filename)[1])
+        dev = remote.device(str(inp.task.target), device)
         # Limitation:
         # We can not get PackFunction directly in the remote mode as it is wrapped
         # under the std::function. We could lift the restriction later once we fold
