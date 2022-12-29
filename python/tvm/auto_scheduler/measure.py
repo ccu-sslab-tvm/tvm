@@ -554,7 +554,7 @@ class LocalRPCMeasureContext:
         cooldown_interval=0.0,
         enable_cpu_cache_flush=False,
         device=0,
-        moduler_loader=None,
+        module_loader=None,
     ):
         # pylint: disable=import-outside-toplevel
         from tvm.rpc.server import Server
@@ -582,7 +582,7 @@ class LocalRPCMeasureContext:
             cooldown_interval,
             enable_cpu_cache_flush,
             device,
-            moduler_loader
+            module_loader
         )
         # Wait for the processes to start
         time.sleep(0.5)
@@ -1091,11 +1091,19 @@ def _rpc_run(
     error_no = 0
     error_msg = None
     try:
-        # upload built module
-        remote = request_remote(key, host, port, priority, timeout)
-        remote.upload(build_res.filename)
-        func = remote.load_module(os.path.split(build_res.filename)[1])
-        dev = remote.device(str(inp.task.target), device)
+        ##################### use module_loader here #####################
+        if module_loader != None:
+            module_loader.get_remote()
+            module_loader.get_sys_lib()
+            remote = module_loader.remote
+            func = module_loader.system_lib
+            dev = remote.device(str(inp.task.target))
+        else:
+            # upload built module
+            remote = request_remote(key, host, port, priority, timeout)
+            remote.upload(build_res.filename)
+            func = remote.load_module(os.path.split(build_res.filename)[1])
+            dev = remote.device(str(inp.task.target), device)
         # Limitation:
         # We can not get PackFunction directly in the remote mode as it is wrapped
         # under the std::function. We could lift the restriction later once we fold
