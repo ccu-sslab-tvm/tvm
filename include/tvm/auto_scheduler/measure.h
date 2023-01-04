@@ -280,7 +280,7 @@ class AutoSchedulerModuleLoaderNode : public Object {
   }
 
   void get_remote(String device_key, String host, int port, int priority, int timeout, 
-                  const Array<BuildResult>& build_results);
+                  const BuildResult build_res);
   void get_sys_lib();
 
   static constexpr const char* _type_key = "micro.AutoSchedulerModuleLoader";

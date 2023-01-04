@@ -117,18 +117,28 @@ AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir
   data_ = std::move(node);
 }
 
-void get_remote(String device_key, String host, int port, int priority, int timeout, 
-                const Array<BuildResult>& build_results) {
+void AutoSchedulerModuleLoaderNode::get_remote(String device_key, String host, int port, int priority, int timeout, 
+                const BuildResult build_res) {
+  printf("#######C: get_remote()#######");
   if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.get_remote")) {
-    (*f)(device_key, host, port, priority, timeout, build_results);
+    (*f)(device_key);//, host, port, priority, timeout, build_res);
     return;
+  } else {
+    LOG(FATAL) << "micro.AutoSchedulerModuleLoader.get_remote is not registered. "
+               << "This is a function registered in Python, "
+               << "make sure the TVM Python runtime has been loaded successfully.";
   }
 }
 
-void get_sys_lib() {
+void AutoSchedulerModuleLoaderNode::get_sys_lib() {
+  printf("#######C: get_sys_lib()#######");
   if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.get_sys_lib")) {
     (*f)();
     return;
+  } else {
+    LOG(FATAL) << "micro.AutoSchedulerModuleLoader.get_sys_lib is not registered. "
+               << "This is a function registered in Python, "
+               << "make sure the TVM Python runtime has been loaded successfully.";
   }
 }
 
