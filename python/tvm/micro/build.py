@@ -177,8 +177,10 @@ class AutoSchedulerModuleLoader(Object):
             verbose,
             project_type,
         )
-    @tvm.register_func("micro.AutoSchedulerModuleLoader.get_remote")
+
+    @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.get_remote")
     def get_remote(self, device_key, host, port, priority, timeout, build_result):
+        print("#######py: get_remote()#######")
         with open(build_result.filename, "rb") as build_file:
             build_result_bin = build_file.read()
 
@@ -196,8 +198,9 @@ class AutoSchedulerModuleLoader(Object):
         )
         self.remote = remote
 
-    @tvm.register_func("micro.AutoSchedulerModuleLoader.get_sys_lib")
+    @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.get_sys_lib")
     def get_sys_lib(self):
+        print("#######py: get_sys_lib()#######")
         system_lib = self.remote.get_function("runtime.SystemLib")()
         self.system_lib = system_lib
 
