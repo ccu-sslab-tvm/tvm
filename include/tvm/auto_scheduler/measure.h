@@ -279,9 +279,8 @@ class AutoSchedulerModuleLoaderNode : public Object {
     v->Visit("project_type", &project_type);
   }
 
-  void get_remote(String device_key, String host, int port, int priority, int timeout, 
+  void init_remote_lib(String device_key, String host, int port, int priority, int timeout, 
                   const BuildResult build_res);
-  void get_sys_lib();
 
   static constexpr const char* _type_key = "micro.AutoSchedulerModuleLoader";
   TVM_DECLARE_FINAL_OBJECT_INFO(AutoSchedulerModuleLoaderNode, Object);

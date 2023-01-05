@@ -1091,11 +1091,18 @@ def _rpc_run(
     error_no = 0
     error_msg = None
     try:
-        # upload built module
-        remote = request_remote(key, host, port, priority, timeout)
-        remote.upload(build_res.filename)
-        func = remote.load_module(os.path.split(build_res.filename)[1])
-        dev = remote.device(str(inp.task.target), device)
+        ##################### use module_loader here #####################
+        if module_loader != None:
+            _ffi_api.AutoSchedulerModuleLoaderInit(module_loader, key, host, port, priority, timeout, build_res)
+            remote = module_loader.remote
+            func = module_loader.system_lib
+            dev = remote.device(str(inp.task.target))
+        else:
+            # upload built module
+            remote = request_remote(key, host, port, priority, timeout)
+            remote.upload(build_res.filename)
+            func = remote.load_module(os.path.split(build_res.filename)[1])
+            dev = remote.device(str(inp.task.target), device)
         # Limitation:
         # We can not get PackFunction directly in the remote mode as it is wrapped
         # under the std::function. We could lift the restriction later once we fold

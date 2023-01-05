@@ -168,7 +168,14 @@ autotvm_build_func.output_format = ".model-library-format"
 @tvm._ffi.register_object("micro.AutoSchedulerModuleLoader")
 class AutoSchedulerModuleLoader(Object):
     
-    def __init__(self, template_project_dir: str, zephyr_board: str, west_cmd: str, verbose: bool, project_type:str):#project_options: dict = None):
+    def __init__(self, template_project_dir: str, zephyr_board: str, west_cmd: str, verbose: bool, project_type:str):
+        self._template_project_dir = template_project_dir
+        self._project_options = {
+            "zephyr_board": zephyr_board,
+            "west_cmd": west_cmd,
+            "verbose": verbose,
+            "project_type": project_type
+        }
         self.__init_handle_by_constructor__(
             _ffi_api.AutoSchedulerModuleLoader,
             template_project_dir,
@@ -178,14 +185,14 @@ class AutoSchedulerModuleLoader(Object):
             project_type,
         )
 
-    @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.get_remote")
-    def get_remote(self, device_key, host, port, priority, timeout, build_result):
-        print("#######py: get_remote()#######")
+    @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.init_remote_lib")
+    def init_remote_lib(self, device_key, host, port, priority, timeout, build_result):
         with open(build_result.filename, "rb") as build_file:
             build_result_bin = build_file.read()
 
         tracker = _rpc.connect_tracker(host, port)
-        remote = tracker.request(
+        print("#######py: init_remote_lib(1)#######")
+        self.remote = tracker.request(
             device_key,
             priority=priority,
             session_timeout=timeout,
@@ -196,13 +203,9 @@ class AutoSchedulerModuleLoader(Object):
                 json.dumps(self._project_options),
             ],
         )
-        self.remote = remote
-
-    @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.get_sys_lib")
-    def get_sys_lib(self):
-        print("#######py: get_sys_lib()#######")
-        system_lib = self.remote.get_function("runtime.SystemLib")()
-        self.system_lib = system_lib
+        print("#######py: init_remote_lib(2)#######")
+        self.system_lib = self.remote.get_function("runtime.SystemLib")()
+        print("#######py: init_remote_lib(3)#######")
 
 @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.build_func")
 def auto_scheduler_build_func():

@@ -117,26 +117,13 @@ AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir
   data_ = std::move(node);
 }
 
-void AutoSchedulerModuleLoaderNode::get_remote(String device_key, String host, int port, int priority, int timeout, 
+void AutoSchedulerModuleLoaderNode::init_remote_lib(String device_key, String host, int port, int priority, int timeout, 
                 const BuildResult build_res) {
-  printf("#######C: get_remote()#######");
-  if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.get_remote")) {
-    (*f)(device_key);//, host, port, priority, timeout, build_res);
+  if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.init_remote_lib")) {
+    (*f)(this, device_key, host, port, priority, timeout, build_res);
     return;
   } else {
-    LOG(FATAL) << "micro.AutoSchedulerModuleLoader.get_remote is not registered. "
-               << "This is a function registered in Python, "
-               << "make sure the TVM Python runtime has been loaded successfully.";
-  }
-}
-
-void AutoSchedulerModuleLoaderNode::get_sys_lib() {
-  printf("#######C: get_sys_lib()#######");
-  if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.get_sys_lib")) {
-    (*f)();
-    return;
-  } else {
-    LOG(FATAL) << "micro.AutoSchedulerModuleLoader.get_sys_lib is not registered. "
+    LOG(FATAL) << "micro.AutoSchedulerModuleLoader.init_remote_lib is not registered. "
                << "This is a function registered in Python, "
                << "make sure the TVM Python runtime has been loaded successfully.";
   }
@@ -435,8 +422,15 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ProgramMeasurer")
     });
 
 TVM_REGISTER_GLOBAL("micro.AutoSchedulerModuleLoader")
-    .set_body_typed([](String template_project_dir, String zephyr_board, String west_cmd, bool verbose, String project_type) {//std::map<String, std::_Any_data> project_options) {
+    .set_body_typed([](String template_project_dir, String zephyr_board, String west_cmd, bool verbose, String project_type) {
       return AutoSchedulerModuleLoader(template_project_dir, zephyr_board, west_cmd, verbose, project_type);
+    });
+
+TVM_REGISTER_GLOBAL("auto_scheduler.AutoSchedulerModuleLoaderInit")
+    .set_body_typed([](const AutoSchedulerModuleLoader& module_loader, 
+                        String key, String host, int port, int priority, int timeout, 
+                        BuildResult build_res){
+      return module_loader -> init_remote_lib(key, host, port, priority, timeout, build_res);
     });
 
 TVM_REGISTER_GLOBAL("auto_scheduler.ProgramBuilderBuild")
