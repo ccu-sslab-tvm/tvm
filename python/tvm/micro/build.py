@@ -207,7 +207,6 @@ class AutoSchedulerModuleLoader(Object):
         self.system_lib = self.remote.get_function("runtime.SystemLib")()
         print("#######py: init_remote_lib(3)#######")
 
-@tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.build_func")
 def auto_scheduler_build_func():
     """A dummy build function which causes autotvm to use a different export format."""
 

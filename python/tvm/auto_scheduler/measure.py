@@ -310,6 +310,8 @@ class ProgramMeasurer(Object):
             _ffi_api.ProgramMeasurer, builder, runner, callbacks, verbose, max_continuous_error
         )
 
+class CustomedRuntime:
+    runtime = None
 
 @tvm._ffi.register_object("auto_scheduler.LocalBuilder")
 class LocalBuilder(ProgramBuilder):
@@ -328,7 +330,7 @@ class LocalBuilder(ProgramBuilder):
         If is callable, use it as custom build function, expect lib_format field.
     """
 
-    def __init__(self, timeout=15, n_parallel=multiprocessing.cpu_count(), build_func="default"):
+    def __init__(self, timeout=15, n_parallel=multiprocessing.cpu_count(), build_func="default", runtime = None):
         if build_func == "default":
             BuildFunc.name = "default"
             BuildFunc.build_func = tar.tar
@@ -340,6 +342,8 @@ class LocalBuilder(ProgramBuilder):
             BuildFunc.build_func = build_func
         else:
             raise ValueError("Invalid build_func" + build_func)
+
+        CustomedRuntime.runtime = runtime
 
         self.__init_handle_by_constructor__(
             _ffi_api.LocalBuilder, timeout, n_parallel, BuildFunc.name
@@ -609,7 +613,7 @@ class MeasureErrorNo(object):
     UNKNOWN_ERROR = 8  # Unknown error
 
 
-def _local_build_worker(inp_serialized, build_func, verbose):
+def _local_build_worker(inp_serialized, build_func, verbose, runtime):
     tic = time.time()
     inp = MeasureInput.deserialize(inp_serialized)
     task = inp.task
@@ -631,11 +635,19 @@ def _local_build_worker(inp_serialized, build_func, verbose):
     if error_no == 0:
         dirname = tempfile.mkdtemp()
         filename = os.path.join(dirname, "tmp_func." + build_func.output_format)
-
+        
         try:
             with transform.PassContext().current():
-                func = build_module.build(sch, args, target=task.target)
-            func.export_library(filename, build_func)
+                func = build_module.build(sch, args, target=task.target, runtime=runtime)
+
+            if build_func.output_format == ".model-library-format":
+                try:
+                    from tvm import micro
+                except ImportError:
+                    raise ImportError("Requires USE_MICRO")
+                micro.export_model_library_format(func, filename)
+            else:
+                func.export_library(filename, build_func)
         # pylint: disable=broad-except
         except Exception:
             error_no = MeasureErrorNo.COMPILE_HOST
@@ -666,9 +678,9 @@ def local_build_worker(args):
     res : BuildResult
         The build result of this Builder thread.
     """
-    inp, build_func, verbose = args
+    inp, build_func, verbose, runtime = args
 
-    return _local_build_worker(inp, build_func, verbose)
+    return _local_build_worker(inp, build_func, verbose, runtime)
 
 
 @tvm._ffi.register_func("auto_scheduler.local_builder.build")
@@ -708,6 +720,7 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
                 i.serialize(),
                 BuildFunc.build_func,
                 verbose,
+                CustomedRuntime.runtime
             )
             for i in inputs
         ],
