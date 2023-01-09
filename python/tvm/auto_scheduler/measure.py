@@ -44,7 +44,7 @@ from tvm.contrib import ndk, tar
 from tvm.contrib.popen_pool import PopenPoolExecutor, PopenWorker, StatusKind
 from tvm.driver import build_module
 from tvm.ir import transform
-from tvm.micro.build import AutoSchedulerBase
+from tvm.micro.build import AutoSchedulerBase, AutoSchedulerModuleLoader
 from tvm.runtime import Object, module, ndarray
 from tvm.target import Target
 
@@ -331,7 +331,7 @@ class LocalBuilder(ProgramBuilder):
         If is callable, use it as custom build function, expect lib_format field.
     """
 
-    def __init__(self, timeout=15, n_parallel=multiprocessing.cpu_count(), build_func="default", runtime = None):
+    def __init__(self, timeout=15, n_parallel=multiprocessing.cpu_count(), disable_vectorize = False, build_func="default", runtime = None):
         if build_func == "default":
             BuildFunc.name = "default"
             BuildFunc.build_func = tar.tar
@@ -347,7 +347,7 @@ class LocalBuilder(ProgramBuilder):
         CustomedRuntime.runtime = runtime
 
         self.__init_handle_by_constructor__(
-            _ffi_api.LocalBuilder, timeout, n_parallel, BuildFunc.name
+            _ffi_api.LocalBuilder, timeout, n_parallel, disable_vectorize, BuildFunc.name
         )
 
 
@@ -613,8 +613,20 @@ class MeasureErrorNo(object):
     RUN_TIMEOUT = 7  # Timeout during run
     UNKNOWN_ERROR = 8  # Unknown error
 
+def _build_func_common(sch, args, target, runtime, disable_vectorize):
+    current_pass_context: transform.PassContext = (
+        transform.PassContext.current()
+    )
+    current_config = dict(current_pass_context.config)
+    build_option = {
+        "tir.disable_vectorize": disable_vectorize,
+    }
+    current_config.update(build_option)
+    with transform.PassContext(config = current_config):
+        func = build_module.build(sch, args, target=target, runtime=runtime)
+    return func
 
-def _local_build_worker(inp_serialized, build_func, verbose, runtime):
+def _local_build_worker(inp_serialized, disable_vectorize, build_func, verbose, runtime):
     tic = time.time()
     inp = MeasureInput.deserialize(inp_serialized)
     task = inp.task
@@ -638,8 +650,7 @@ def _local_build_worker(inp_serialized, build_func, verbose, runtime):
         filename = os.path.join(dirname, "tmp_func." + build_func.output_format)
         
         try:
-            with transform.PassContext().current():
-                func = build_module.build(sch, args, target=task.target, runtime=runtime)
+            func = _build_func_common(sch, args, target=task.target, runtime=runtime, disable_vectorize=disable_vectorize)
 
             if build_func.output_format == ".model-library-format":
                 try:
@@ -679,13 +690,13 @@ def local_build_worker(args):
     res : BuildResult
         The build result of this Builder thread.
     """
-    inp, build_func, verbose, runtime = args
+    inp, disable_vectorize, build_func, verbose, runtime = args
 
-    return _local_build_worker(inp, build_func, verbose, runtime)
+    return _local_build_worker(inp, disable_vectorize, build_func, verbose, runtime)
 
 
 @tvm._ffi.register_func("auto_scheduler.local_builder.build")
-def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbose=1):
+def local_builder_build(inputs, timeout, n_parallel, disable_vectorize, build_func="default", verbose=1):
     """
     Build function of LocalBuilder to build the MeasureInputs to runnable modules.
 
@@ -719,6 +730,7 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
         [
             (
                 i.serialize(),
+                disable_vectorize,
                 BuildFunc.build_func,
                 verbose,
                 CustomedRuntime.runtime
@@ -1168,10 +1180,11 @@ def _rpc_run(
             costs = time_f(*loc_args).results
 
             # clean up remote files
-            remote.remove(build_res.filename)
-            remote.remove(os.path.splitext(build_res.filename)[0] + ".so")
-            remote.remove("")
-            dev.free_raw_stream(stream)
+            if not isinstance(module_loader, AutoSchedulerModuleLoader):
+                remote.remove(build_res.filename)
+                remote.remove(os.path.splitext(build_res.filename)[0] + ".so")
+                remote.remove("")
+                dev.free_raw_stream(stream)
         # pylint: disable=broad-except
         except Exception:
             dev.free_raw_stream(stream)

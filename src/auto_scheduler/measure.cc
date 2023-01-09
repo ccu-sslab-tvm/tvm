@@ -130,17 +130,18 @@ void AutoSchedulerModuleLoaderNode::init_remote_lib(String device_key, String ho
 }
 
 /********** LocalBuilder **********/
-LocalBuilder::LocalBuilder(int timeout, int n_parallel, const String& build_func) {
+LocalBuilder::LocalBuilder(int timeout, int n_parallel, bool disable_vectorize, const String& build_func) {
   auto node = make_object<LocalBuilderNode>();
   node->timeout = timeout;
   node->n_parallel = n_parallel;
+  node->disable_vectorize = disable_vectorize;
   node->build_func = build_func;
   data_ = std::move(node);
 }
 
 Array<BuildResult> LocalBuilderNode::Build(const Array<MeasureInput>& inputs, int verbose) {
   if (const auto* f = runtime::Registry::Get("auto_scheduler.local_builder.build")) {
-    Array<BuildResult> results = (*f)(inputs, timeout, n_parallel, build_func, verbose);
+    Array<BuildResult> results = (*f)(inputs, timeout, n_parallel, disable_vectorize, build_func, verbose);
     return results;
   }
   LOG(FATAL) << "auto_scheduler.local_builder.build is not registered. "
@@ -443,8 +444,8 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ProgramRunnerRun")
                        int verbose) { return runner->Run(inputs, build_results, verbose); });
 
 TVM_REGISTER_GLOBAL("auto_scheduler.LocalBuilder")
-    .set_body_typed([](int timeout, int n_parallel, const String& build_func) {
-      return LocalBuilder(timeout, n_parallel, build_func);
+    .set_body_typed([](int timeout, int n_parallel, bool disable_vectorize, const String& build_func) {
+      return LocalBuilder(timeout, n_parallel, disable_vectorize, build_func);
     });
 
 TVM_REGISTER_GLOBAL("auto_scheduler.LocalRunner")

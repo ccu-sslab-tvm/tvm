@@ -302,6 +302,8 @@ class ProgramBuilderNode : public Object {
   /*! \brief Timeout of a build */
   int timeout;
 
+  bool disable_vectorize;
+
   /*!
    * \brief Build programs and return results.
    * \param inputs An Array of MeasureInput.
@@ -395,7 +397,7 @@ class LocalBuilder : public ProgramBuilder {
    * \param n_parallel The number of threads used to build in parallel.
    * \param build_func The name of the registered build function.
    */
-  LocalBuilder(int timeout, int n_parallel, const String& build_func);
+  LocalBuilder(int timeout, int n_parallel, bool disable_vectorize, const String& build_func);
 
   TVM_DEFINE_OBJECT_REF_METHODS(LocalBuilder, ProgramBuilder, LocalBuilderNode);
 };
