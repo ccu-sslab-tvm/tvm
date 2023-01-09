@@ -44,6 +44,7 @@ from tvm.contrib import ndk, tar
 from tvm.contrib.popen_pool import PopenPoolExecutor, PopenWorker, StatusKind
 from tvm.driver import build_module
 from tvm.ir import transform
+from tvm.micro.build import AutoSchedulerBase
 from tvm.runtime import Object, module, ndarray
 from tvm.target import Target
 
@@ -1106,9 +1107,9 @@ def _rpc_run(
     try:
         ##################### use module_loader here #####################
         if module_loader != None:
-            _ffi_api.AutoSchedulerModuleLoaderInit(module_loader, key, host, port, priority, timeout, build_res)
-            remote = module_loader.remote
-            func = module_loader.system_lib
+            _ffi_api.AutoSchedulerModuleLoaderInit(module_loader, key, host, port, priority, timeout, build_res) # error here
+            remote = AutoSchedulerBase.remote
+            func = AutoSchedulerBase.system_lib
             dev = remote.device(str(inp.task.target))
         else:
             # upload built module

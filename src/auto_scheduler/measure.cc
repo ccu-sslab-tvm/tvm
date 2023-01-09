@@ -120,7 +120,7 @@ AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(String template_project_dir
 void AutoSchedulerModuleLoaderNode::init_remote_lib(String device_key, String host, int port, int priority, int timeout, 
                 const BuildResult build_res) {
   if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.init_remote_lib")) {
-    (*f)(this, device_key, host, port, priority, timeout, build_res);
+    (*f)(device_key, host, port, priority, timeout, build_res, template_project_dir, zephyr_board, west_cmd, verbose, project_type);
     return;
   } else {
     LOG(FATAL) << "micro.AutoSchedulerModuleLoader.init_remote_lib is not registered. "

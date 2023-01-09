@@ -165,17 +165,14 @@ def autotvm_build_func():
 autotvm_build_func.output_format = ".model-library-format"
 
 
+class AutoSchedulerBase:
+    remote = None
+    system_lib = None
+
 @tvm._ffi.register_object("micro.AutoSchedulerModuleLoader")
 class AutoSchedulerModuleLoader(Object):
     
     def __init__(self, template_project_dir: str, zephyr_board: str, west_cmd: str, verbose: bool, project_type:str):
-        self._template_project_dir = template_project_dir
-        self._project_options = {
-            "zephyr_board": zephyr_board,
-            "west_cmd": west_cmd,
-            "verbose": verbose,
-            "project_type": project_type
-        }
         self.__init_handle_by_constructor__(
             _ffi_api.AutoSchedulerModuleLoader,
             template_project_dir,
@@ -185,27 +182,32 @@ class AutoSchedulerModuleLoader(Object):
             project_type,
         )
 
-    @tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.init_remote_lib")
-    def init_remote_lib(self, device_key, host, port, priority, timeout, build_result):
-        with open(build_result.filename, "rb") as build_file:
-            build_result_bin = build_file.read()
+@tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.init_remote_lib")
+def init_remote_lib(device_key, host, port, priority, timeout, build_result, template_project_dir, zephyr_board, west_cmd, verbose, project_type):
+    with open(build_result.filename, "rb") as build_file:
+        build_result_bin = build_file.read()
 
-        tracker = _rpc.connect_tracker(host, port)
-        print("#######py: init_remote_lib(1)#######")
-        self.remote = tracker.request(
-            device_key,
-            priority=priority,
-            session_timeout=timeout,
-            session_constructor_args=[
-                "tvm.micro.compile_and_create_micro_session",
-                build_result_bin,
-                self._template_project_dir,
-                json.dumps(self._project_options),
-            ],
-        )
-        print("#######py: init_remote_lib(2)#######")
-        self.system_lib = self.remote.get_function("runtime.SystemLib")()
-        print("#######py: init_remote_lib(3)#######")
+    tracker = _rpc.connect_tracker(host, port)
+
+    _project_options = {
+        "zephyr_board": zephyr_board,
+        "west_cmd": west_cmd,
+        "verbose": verbose,
+        "project_type": project_type
+    }
+    
+    AutoSchedulerBase.remote = tracker.request(
+        device_key,
+        priority=priority,
+        session_timeout=timeout,
+        session_constructor_args=[
+            "tvm.micro.compile_and_create_micro_session",
+            build_result_bin,
+            str(template_project_dir),
+            json.dumps(_project_options),
+        ],
+    )
+    AutoSchedulerBase.system_lib = AutoSchedulerBase.remote.get_function("runtime.SystemLib")()
 
 def auto_scheduler_build_func():
     """A dummy build function which causes autotvm to use a different export format."""
