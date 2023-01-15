@@ -579,8 +579,8 @@ class PrintTableInfo(TaskSchedulerCallback):
         _ffi_api.PrintTitle("Task Scheduler")
         print(
             "|  ID  "
-            "|                                                                   Task Description                                                                   "
-            "| Latency (ms) | Speed (GFLOPS) | Trials |"
+            "|                                                                    Task Description                                                                    "
+            "|    Latency (ms)    |    Speed (GFLOPS)    | Trials |"
         )
         print(
             "----------------------------------------------------------------"
@@ -606,7 +606,7 @@ class PrintTableInfo(TaskSchedulerCallback):
             )
             trials_str = "%d" % (task_scheduler.task_cts[i] * task_scheduler.num_measures_per_round)
             print(
-                "| %4s | %148s | %12s | % 14s | %6s |"
+                "| %4s | %150s | %18s | % 20s | %6s |"
                 % (id_str, task_desc, latency_str, speed_str, trials_str)
             )
         print(
