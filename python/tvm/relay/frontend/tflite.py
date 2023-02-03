@@ -190,7 +190,6 @@ class OperatorConverter(object):
         for op_idx in range(self.subgraph.OperatorsLength()):
             op = self.subgraph.Operators(op_idx)
             op_code_str = self.get_op_code_str(op)
-            print(op_code_str)
             if op_code_str not in self.convert_map:
                 unsupported_ops_set.add(op_code_str)
                 continue
@@ -3964,5 +3963,4 @@ def from_tflite(model, shape_dict=None, dtype_dict=None, op_converter=OperatorCo
     )
     func = _function.Function(analysis.free_vars(outputs), outputs, attrs=attrs)
     mod = IRModule.from_expr(func)
-    print(mod)
     return mod, params
