@@ -98,7 +98,7 @@
     },
     "nucleo_h743zi": {
         "board": "nucleo_h743zi",
-        "model": "stm32H7x",
+        "model": "stm32H743xx",
         "is_qemu": false,
         "fpu": true,
         "vid_hex": "0483",
