@@ -1142,7 +1142,7 @@ int32_t TVMGraphExecutor_CreateTVMOp(TVMGraphExecutor* executor, const TVMOpPara
     }
   }
   if (!strcmp(param->func_name, "__nop") || !strcmp(param->func_name, "__copy")) {
-    fprintf(stderr, "%s function is not yet supported.", param->func_name);
+    fprintf(stderr, "%s function is not yet supported.\r\n", param->func_name);
     status = -1;
   }
 
