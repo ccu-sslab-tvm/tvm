@@ -323,6 +323,12 @@ PROJECT_OPTIONS = [
         help="Extra definitions added project compile.",
     ),
     server.ProjectOption(
+        "use_cmsis",
+        optional=["generate_project"],
+        type="bool",
+        help="Enable CMSIS Library for Zephyr.",
+    ),
+    server.ProjectOption(
         "cmsis_path",
         optional=["generate_project"],
         type="str",
@@ -414,6 +420,24 @@ class Handler(server.ProjectAPIHandler):
                 f.write(f"CONFIG_MAIN_STACK_SIZE={options['config_main_stack_size']}\n")
 
             f.write("# For random number generation.\n" "CONFIG_TEST_RANDOM_GENERATOR=y\n")
+            
+            if options["use_cmsis"]:
+                f.write(
+                    "\n# Enable CMSIS_NN Library.\n"
+                    "CONFIG_NEWLIB_LIBC=y\n"
+                    "CONFIG_CMSIS_DSP=y\n"
+                    "CONFIG_CMSIS_NN=y\n"
+                    "CONFIG_CMSIS_NN_ACTIVATION=y\n"
+                    "CONFIG_CMSIS_NN_BASICMATH=y\n"
+                    "CONFIG_CMSIS_NN_CONCATENATION=y\n"
+                    "CONFIG_CMSIS_NN_CONVOLUTION=y\n"
+                    "CONFIG_CMSIS_NN_FULLYCONNECTED=y\n"
+                    "CONFIG_CMSIS_NN_NNSUPPORT=y\n"
+                    "CONFIG_CMSIS_NN_POOLING=y\n"
+                    "CONFIG_CMSIS_NN_RESHAPE=y\n"
+                    "CONFIG_CMSIS_NN_SOFTMAX=y\n"
+                    "CONFIG_CMSIS_NN_SVD=y\n"
+                )
 
             f.write("\n# Extra prj.conf directives\n")
             for line, board_list in self.EXTRA_PRJ_CONF_DIRECTIVES.items():
