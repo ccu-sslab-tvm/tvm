@@ -421,7 +421,7 @@ class Handler(server.ProjectAPIHandler):
 
             f.write("# For random number generation.\n" "CONFIG_TEST_RANDOM_GENERATOR=y\n")
             
-            if options["use_cmsis"]:
+            if options.get("use_cmsis", False):
                 f.write(
                     "\n# Enable CMSIS_NN Library.\n"
                     "CONFIG_NEWLIB_LIBC=y\n"
