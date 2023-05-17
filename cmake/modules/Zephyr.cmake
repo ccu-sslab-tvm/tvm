@@ -23,6 +23,7 @@ if(USE_MICRO)
       "apps/microtvm/zephyr/template_project microtvm_api_server.py -> zephyr"
       "apps/microtvm/zephyr/template_project boards.json -> zephyr"
       "apps/microtvm/zephyr/template_project CMakeLists.txt.template -> zephyr"
+      "apps/microtvm/zephyr/template_project/src/fiti_standalone *.c -> zephyr/src/fiti_standalone"
       "apps/microtvm/zephyr/template_project/src/aot_standalone_demo *.c -> zephyr/src/aot_standalone_demo"
       "apps/microtvm/zephyr/template_project/src/aot_standalone_demo *.h -> zephyr/src/aot_standalone_demo"
       "apps/microtvm/zephyr/template_project/src/host_driven *.c -> zephyr/src/host_driven"

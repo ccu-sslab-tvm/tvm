@@ -393,13 +393,17 @@ class Handler(server.ProjectAPIHandler):
             f.write(
                 "# For UART used from main().\n"
                 "CONFIG_RING_BUFFER=y\n"
-                "CONFIG_UART_CONSOLE=n\n"
                 "CONFIG_UART_INTERRUPT_DRIVEN=y\n"
                 "CONFIG_MAIN_STACK_SIZE=8192\n"
                 "CONFIG_MEMC=y\n"
-                "CONFIG_SYS_HEAP_BIG_ONLY=y"
-                "\n"
+                "CONFIG_SYS_HEAP_BIG_ONLY=y\n"
             )
+            if options["project_type"] == "host_driven":
+                f.write(
+                    "CONFIG_UART_CONSOLE=n\n"
+                    "\n"
+                )
+
             f.write("# For TVMPlatformAbort().\n" "CONFIG_REBOOT=y\n" "\n")
 
             if options["project_type"] == "host_driven":
@@ -452,6 +456,7 @@ class Handler(server.ProjectAPIHandler):
     CRT_LIBS_BY_PROJECT_TYPE = {
         "host_driven": "microtvm_rpc_server microtvm_rpc_common aot_executor_module aot_executor common",
         "aot_standalone_demo": "memory microtvm_rpc_common common",
+        "fiti_standalone": "common",
     }
 
     def _get_platform_version(self, zephyr_base: str) -> float:
