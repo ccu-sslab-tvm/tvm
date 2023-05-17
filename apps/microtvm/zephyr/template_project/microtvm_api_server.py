@@ -456,7 +456,7 @@ class Handler(server.ProjectAPIHandler):
     CRT_LIBS_BY_PROJECT_TYPE = {
         "host_driven": "microtvm_rpc_server microtvm_rpc_common aot_executor_module aot_executor common",
         "aot_standalone_demo": "memory microtvm_rpc_common common",
-        "fiti_standalone": "common",
+        "fiti_standalone": "memory common",
     }
 
     def _get_platform_version(self, zephyr_base: str) -> float:
