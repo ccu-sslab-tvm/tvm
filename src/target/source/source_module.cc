@@ -334,7 +334,7 @@ class CSourceCrtMetadataModuleNode : public runtime::ModuleNode {
   }
 
   void GenerateWorkspaceBuffer(const WorkspacePoolInfoNode* pool_info, size_t allocated_size) {
-    code_ << "__attribute__((section(\".bss.noinit.tvm\"), ";
+    code_ << "__attribute__((section(\"SDRAM2\"), ";
     code_ << "aligned(" << metadata_->workspace_alignment << ")))\n";
     code_ << "static uint8_t " << pool_info->pool_name << "[";
     code_ << allocated_size << "];\n";
