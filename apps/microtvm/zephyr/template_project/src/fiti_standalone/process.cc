@@ -1,6 +1,7 @@
 #include "process.h"
 
 #include <stdio.h>
+#include <cstdarg>
 #include <vector>
 #include <algorithm>
 
@@ -13,6 +14,13 @@
 #define DEQNT(num)		float(0.006245302967727184 * (num + 122))
 
 using namespace std;
+
+void TVMLogf(const char* msg, ...) {
+  va_list args;
+  va_start(args, msg);
+  vfprintf(stderr, msg, args);
+  va_end(args);
+}
 
 struct Bbox {
 	int x1, y1, x2, y2;
@@ -133,6 +141,6 @@ void post_process(int8_t* outputs) {
 
 	int boxes_size = boxes.size();
 	for(int i=0;i<boxes_size;i++) {
-		printf("class: %d, x1:%d, y1:%d, x2:%d, y2:%d, confidence:%f\r\n", boxes[i].class_id, boxes[i].x1, boxes[i].y1, boxes[i].x2, boxes[i].y2, boxes[i].confidence*100);
+		TVMLogf("class: %d, x1:%d, y1:%d, x2:%d, y2:%d, confidence:%f\r\n", boxes[i].class_id, boxes[i].x1, boxes[i].y1, boxes[i].x2, boxes[i].y2, boxes[i].confidence*100);
 	}
 }

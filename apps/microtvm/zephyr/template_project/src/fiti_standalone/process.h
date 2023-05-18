@@ -7,6 +7,8 @@ extern "C" {
 
 #include <stdint.h>
 
+void TVMLogf(const char* msg, ...);
+
 void post_process(int8_t* outputs);
 
 #ifdef __cplusplus

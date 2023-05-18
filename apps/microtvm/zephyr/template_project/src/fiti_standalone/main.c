@@ -16,15 +16,6 @@ __attribute__((section("SDRAM2"))) struct tvmgen_default_inputs inputs;
 __attribute__((section("SDRAM2"))) struct tvmgen_default_outputs outputs;
 __attribute__((section("SDRAM2"))) uint8_t memory[5 * 1024 * 1024];
 
-extern void post_process(int8_t* outputs);
-
-void TVMLogf(const char* msg, ...) {
-  va_list args;
-  va_start(args, msg);
-  vfprintf(stderr, msg, args);
-  va_end(args);
-}
-
 void TVMPlatformAbort(tvm_crt_error_t error_code) {
 	printf("[%s] tvm_crt_error_t: %d\r\n", __func__, error_code);
 }
