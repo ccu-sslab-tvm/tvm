@@ -6,6 +6,7 @@
 #include "tvm/runtime/crt/page_allocator.h"
 #include "tvm/runtime/crt/error_codes.h"
 #include "dlpack/dlpack.h"
+#include "process.h"
 
 __attribute__((section("SDRAM2"))) MemoryManagerInterface* memory_manager;
 
@@ -13,7 +14,9 @@ __attribute__((section("SDRAM2"))) extern int8_t raw_data[192 * 192];
 __attribute__((section("SDRAM2"))) int8_t result[1 * 540 * 10];
 __attribute__((section("SDRAM2"))) struct tvmgen_default_inputs inputs;
 __attribute__((section("SDRAM2"))) struct tvmgen_default_outputs outputs;
-__attribute__((section("SDRAM2"))) uint8_t memory[2048 * 1024];
+__attribute__((section("SDRAM2"))) uint8_t memory[5 * 1024 * 1024];
+
+extern void post_process(int8_t* outputs);
 
 void TVMLogf(const char* msg, ...) {
   va_list args;
@@ -43,6 +46,10 @@ void main(void) {
         t3 = k_cycle_get_32();
         tvmgen_default_run(&inputs, &outputs);
         t4 = k_cycle_get_32();
-        TVMLogf("tvmgen_default_run tick = %u ms\r\n", (uint32_t)((uint64_t)(t4-t3)*1000/clock_freq));
+
+        t5 = k_cycle_get_32();
+        post_process(outputs.Identity_int8);
+        t6 = k_cycle_get_32();
+        TVMLogf("model cost %u ms, post_process cost %u ms\r\n", (uint32_t)((uint64_t)(t4-t3)*1000/clock_freq), (uint32_t)((uint64_t)(t6-t5)*1000/clock_freq));
     }
 }

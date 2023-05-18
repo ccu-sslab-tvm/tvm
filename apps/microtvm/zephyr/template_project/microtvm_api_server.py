@@ -406,9 +406,9 @@ class Handler(server.ProjectAPIHandler):
 
             f.write("# For TVMPlatformAbort().\n" "CONFIG_REBOOT=y\n" "\n")
 
-            if options["project_type"] == "host_driven":
+            if (options["project_type"] == "host_driven") or (options["project_type"] == "fiti_standalone"):
                 f.write(
-                    "# For RPC server C++ bindings.\n"
+                    "# For C++ bindings.\n"
                     "CONFIG_CPLUSPLUS=y\n"
                     "CONFIG_LIB_CPLUSPLUS=y\n"
                     "\n"
