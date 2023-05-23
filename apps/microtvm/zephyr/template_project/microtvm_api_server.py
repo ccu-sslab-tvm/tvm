@@ -364,6 +364,20 @@ PROJECT_OPTIONS = server.default_project_options(
         default=None,
         help="Sets the value for TVM_WORKSPACE_SIZE_BYTES passed to K_HEAP_DEFINE() to service TVM memory allocation requests.",
     ),
+    server.ProjectOption(
+        "config_memc",
+        optional=["generate_project"],
+        type="bool",
+        default=False,
+        help="Sets CONFIG_MEMC for Zephyr board.",
+    ),
+    server.ProjectOption(
+        "config_sys_heap_big_only",
+        optional=["generate_project"],
+        type="bool",
+        default=False,
+        help="Sets CONFIG_SYS_HEAP_BIG_ONLY for Zephyr board.",
+    ),
 ]
 
 
@@ -409,6 +423,8 @@ class Handler(server.ProjectAPIHandler):
         board: str,
         project_type: str,
         config_main_stack_size: int,
+        config_memc: bool,
+        config_sys_heap_big_only: bool,
         config_led: bool,
         use_fvp: bool,
     ):
@@ -431,10 +447,10 @@ class Handler(server.ProjectAPIHandler):
 
             if project_type == "host_driven":
                 f.write(
-                    "CONFIG_TIMING_FUNCTIONS=y\n"
                     "# For RPC server C++ bindings.\n"
                     "CONFIG_CPLUSPLUS=y\n"
                     "CONFIG_LIB_CPLUSPLUS=y\n"
+                    "CONFIG_TIMING_FUNCTIONS=y\n"
                     "\n"
                 )
 
@@ -442,10 +458,18 @@ class Handler(server.ProjectAPIHandler):
 
             if self._has_fpu(board):
                 f.write("# For models with floating point.\n" "CONFIG_FPU=y\n" "\n")
+ 
+            if config_memc:
+                f.write(
+                    "# For memory config\n"
+                    "CONFIG_MEMC=y\n"
+                )
+            if config_sys_heap_big_only:
+                f.write("CONFIG_SYS_HEAP_BIG_ONLY=y\n")
 
             # Set main stack size, if needed.
             if config_main_stack_size is not None:
-                f.write(f"CONFIG_MAIN_STACK_SIZE={config_main_stack_size}\n")
+                f.write(f"CONFIG_MAIN_STACK_SIZE={config_main_stack_size}\n" "\n")
 
             f.write("# For random number generation.\n" "CONFIG_TEST_RANDOM_GENERATOR=y\n")
 
@@ -453,6 +477,8 @@ class Handler(server.ProjectAPIHandler):
             for line, board_list in self.EXTRA_PRJ_CONF_DIRECTIVES.items():
                 if board in board_list:
                     f.write(f"{line}\n")
+            
+            f.write("\n")
 
             # TODO(mehrdadh): due to https://github.com/apache/tvm/issues/12721
             if board not in ["qemu_riscv64"]:
@@ -564,6 +590,8 @@ class Handler(server.ProjectAPIHandler):
 
         compile_definitions = options.get("compile_definitions")
         config_main_stack_size = options.get("config_main_stack_size")
+        config_memc = options.get("config_memc")
+        config_sys_heap_big_only = options.get("config_sys_heap_big_only")
 
         extra_files_tar = options.get("extra_files_tar")
         cmsis_path = options.get("cmsis_path")
@@ -676,7 +704,7 @@ class Handler(server.ProjectAPIHandler):
                     cmake_f.write(f"target_compile_definitions(app PUBLIC -DFVP=1)\n")
 
         self._create_prj_conf(
-            project_dir, zephyr_board, project_type, config_main_stack_size, verbose, use_fvp
+            project_dir, zephyr_board, project_type, config_main_stack_size, config_memc, config_sys_heap_big_only, verbose, use_fvp
         )
 
         # Populate crt-config.h
