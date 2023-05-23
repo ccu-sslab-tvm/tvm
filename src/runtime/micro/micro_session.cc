@@ -362,7 +362,7 @@ class MicroTransportChannel : public RPCChannel {
         break;
 
       case MessageType::kLog:
-        uint8_t message[1024];
+        uint8_t message[10240];
         message_size_bytes = buf->ReadAvailable();
         if (message_size_bytes == 0) {
           return;
