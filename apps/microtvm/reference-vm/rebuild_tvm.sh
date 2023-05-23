@@ -42,6 +42,6 @@ fi
 
 ./tests/scripts/task_config_build_cortexm.sh "${BUILD_DIR}"
 cd "${BUILD_DIR}"
-cmake ..
 rm -rf standalone_crt host_standalone_crt  # remove stale generated files
+cmake ..
 make -j${num_cores}
