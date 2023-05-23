@@ -927,8 +927,8 @@ class ZephyrSerialTransport:
         self._port = serial.Serial(port_path, baudrate=self._lookup_baud_rate(self._zephyr_base))
         return server.TransportTimeouts(
             session_start_retry_timeout_sec=2.0,
-            session_start_timeout_sec=5.0,
-            session_established_timeout_sec=5.0,
+            session_start_timeout_sec=10.0,
+            session_established_timeout_sec=600.0,
         )
 
     def close(self):
