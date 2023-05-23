@@ -35,7 +35,9 @@
 #include <zephyr/sys/reboot.h>
 #include <zephyr/timing/timing.h>
 
-K_HEAP_DEFINE(tvm_heap, TVM_WORKSPACE_SIZE_BYTES);
+#define TVM_HEAP_SIZE (5 * 1024 * 1024)
+__attribute__((section("SDRAM2"))) unsigned char tvm_heap_mem[TVM_HEAP_SIZE];
+struct k_heap tvm_heap;
 
 volatile timing_t g_microtvm_start_time, g_microtvm_end_time;
 int g_microtvm_timer_running = 0;
@@ -150,6 +152,8 @@ tvm_crt_error_t TVMPlatformInitialize() {
   // be using it enough we should just keep it enabled.
   timing_init();
   timing_start();
+
+  k_heap_init(&tvm_heap, tvm_heap_mem, TVM_HEAP_SIZE);
 
   return kTvmErrorNoError;
 }
