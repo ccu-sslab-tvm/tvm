@@ -480,6 +480,7 @@ MICRO_SUPPORTED_MODELS = {
     "stm32l4r5zi": ["-mcpu=cortex-m4"],
     "stm32u5xx": ["-mcpu=cortex-m33"],
     "zynq_mp_r5": ["-mcpu=cortex-r5"],
+    "stm32f429xx": ["-mcpu=cortex-m4", "-march=armv7e-m"],
 }
 
 
