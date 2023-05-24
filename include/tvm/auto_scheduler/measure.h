@@ -261,6 +261,46 @@ class PythonBasedMeasureCallback : public MeasureCallback {
                                         PythonBasedMeasureCallbackNode);
 };
 
+// Implementation of AutoTvmModuleLoader
+
+class AutoSchedulerModuleLoaderNode : public Object {
+ public:
+  String template_project_dir;
+  String west_cmd;
+  String board;
+  String project_type;
+  int config_main_stack_size;
+  int workspace_size_bytes;
+  bool config_memc;
+  bool config_sys_heap_big_only;
+  bool verbose;
+
+  void VisitAttrs(tvm::AttrVisitor* v) {
+    v->Visit("template_project_dir", &template_project_dir);
+    v->Visit("west_cmd", &west_cmd);
+    v->Visit("board", &board);
+    v->Visit("project_type", &project_type);
+    v->Visit("config_main_stack_size", &config_main_stack_size);
+    v->Visit("workspace_size_bytes", &workspace_size_bytes);
+    v->Visit("config_memc", &config_memc);
+    v->Visit("config_sys_heap_big_only", &config_sys_heap_big_only);
+    v->Visit("verbose", &verbose);
+  }
+
+  void init_remote_lib(String device_key, String host, int port, int priority, int timeout, 
+                  const BuildResult build_res);
+
+  static constexpr const char* _type_key = "micro.AutoSchedulerModuleLoader";
+  TVM_DECLARE_FINAL_OBJECT_INFO(AutoSchedulerModuleLoaderNode, Object);
+};
+
+class AutoSchedulerModuleLoader : public ObjectRef {
+ public:
+  AutoSchedulerModuleLoader(String template_project_dir, String west_cmd, String board, String project_type,
+                            int config_main_stack_size, int workspace_size_bytes, bool config_memc, bool config_sys_heap_big_only, bool verbose);
+  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(AutoSchedulerModuleLoader, ObjectRef, AutoSchedulerModuleLoaderNode);
+};
+
 // The base class of ProgramBuilders and ProgramRunners.
 
 /*! \brief ProgramBuilder that builds the programs */
@@ -270,6 +310,8 @@ class ProgramBuilderNode : public Object {
   int n_parallel;
   /*! \brief Timeout of a build */
   int timeout;
+  /*! \brief Disable vectorization for boards that do not support vectors. */
+  bool disable_vectorize;
 
   /*!
    * \brief Build programs and return results.
@@ -310,6 +352,8 @@ class ProgramRunnerNode : public Object {
   bool enable_cpu_cache_flush;
   /*! \brief Which device to run on if multiple are avaialble. */
   int device;
+  /*! \brief Utilize the module loader to run on the embedded board.*/
+  AutoSchedulerModuleLoader module_loader;
 
   /*!
    * \brief Run measurement and return results.
@@ -362,7 +406,7 @@ class LocalBuilder : public ProgramBuilder {
    * \param n_parallel The number of threads used to build in parallel.
    * \param build_func The name of the registered build function.
    */
-  LocalBuilder(int timeout, int n_parallel, const String& build_func);
+  LocalBuilder(int timeout, int n_parallel, bool disable_vectorize, const String& build_func);
 
   TVM_DEFINE_OBJECT_REF_METHODS(LocalBuilder, ProgramBuilder, LocalBuilderNode);
 };
@@ -450,7 +494,7 @@ class RPCRunner : public ProgramRunner {
    */
   RPCRunner(const String& key, const String& host, int port, int priority, int n_parallel,
             int timeout, int number, int repeat, int min_repeat_ms, double cooldown_interval,
-            bool enable_cpu_cache_flush, int device);
+            bool enable_cpu_cache_flush, int device, AutoSchedulerModuleLoader module_loader);
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(RPCRunner, ProgramRunner, RPCRunnerNode);
 };

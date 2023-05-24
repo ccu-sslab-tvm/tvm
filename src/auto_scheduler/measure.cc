@@ -37,6 +37,7 @@ namespace auto_scheduler {
 TVM_REGISTER_NODE_TYPE(MeasureInputNode);
 TVM_REGISTER_NODE_TYPE(BuildResultNode);
 TVM_REGISTER_NODE_TYPE(MeasureResultNode);
+TVM_REGISTER_NODE_TYPE(AutoSchedulerModuleLoaderNode);
 TVM_REGISTER_OBJECT_TYPE(MeasureCallbackNode);
 TVM_REGISTER_OBJECT_TYPE(PythonBasedMeasureCallbackNode);
 TVM_REGISTER_OBJECT_TYPE(ProgramRunnerNode);
@@ -105,18 +106,58 @@ MeasureResult MeasureResultNode::copy() const {
   return MeasureResult(node);
 }
 
+/********** AutoSchedulerModuleLoader **********/
+AutoSchedulerModuleLoader::AutoSchedulerModuleLoader(
+  String template_project_dir,
+  String west_cmd,
+  String board,
+  String project_type,
+  int config_main_stack_size,
+  int workspace_size_bytes,
+  bool config_memc,
+  bool config_sys_heap_big_only,
+  bool verbose
+) {
+  auto node = make_object<AutoSchedulerModuleLoaderNode>();
+  node->template_project_dir = template_project_dir;
+  node->west_cmd = west_cmd;
+  node->board = board;
+  node->project_type = project_type;
+  node->config_main_stack_size = config_main_stack_size;
+  node->workspace_size_bytes = workspace_size_bytes;
+  node->config_memc = config_memc;
+  node->config_sys_heap_big_only = config_sys_heap_big_only;
+  node->verbose = verbose;
+  data_ = std::move(node);
+}
+
+void AutoSchedulerModuleLoaderNode::init_remote_lib(String device_key, String host, int port, int priority, int timeout, 
+                const BuildResult build_res) {
+  if (const auto* f = runtime::Registry::Get("micro.AutoSchedulerModuleLoader.init_remote_lib")) {
+    (*f)(device_key, host, port, priority, timeout, build_res,
+          template_project_dir, west_cmd, board, project_type, config_main_stack_size, workspace_size_bytes,
+          config_memc, config_sys_heap_big_only, verbose);
+    return;
+  } else {
+    LOG(FATAL) << "micro.AutoSchedulerModuleLoader.init_remote_lib is not registered. "
+               << "This is a function registered in Python, "
+               << "make sure the TVM Python runtime has been loaded successfully.";
+  }
+}
+
 /********** LocalBuilder **********/
-LocalBuilder::LocalBuilder(int timeout, int n_parallel, const String& build_func) {
+LocalBuilder::LocalBuilder(int timeout, int n_parallel, bool disable_vectorize, const String& build_func) {
   auto node = make_object<LocalBuilderNode>();
   node->timeout = timeout;
   node->n_parallel = n_parallel;
+  node->disable_vectorize = disable_vectorize;
   node->build_func = build_func;
   data_ = std::move(node);
 }
 
 Array<BuildResult> LocalBuilderNode::Build(const Array<MeasureInput>& inputs, int verbose) {
   if (const auto* f = runtime::Registry::Get("auto_scheduler.local_builder.build")) {
-    Array<BuildResult> results = (*f)(inputs, timeout, n_parallel, build_func, verbose);
+    Array<BuildResult> results = (*f)(inputs, timeout, n_parallel, disable_vectorize, build_func, verbose);
     return results;
   }
   LOG(FATAL) << "auto_scheduler.local_builder.build is not registered. "
@@ -156,7 +197,8 @@ Array<MeasureResult> LocalRunnerNode::Run(const Array<MeasureInput>& inputs,
 /********** RPCRunner **********/
 RPCRunner::RPCRunner(const String& key, const String& host, int port, int priority, int n_parallel,
                      int timeout, int number, int repeat, int min_repeat_ms,
-                     double cooldown_interval, bool enable_cpu_cache_flush, int device) {
+                     double cooldown_interval, bool enable_cpu_cache_flush, int device,
+                     AutoSchedulerModuleLoader module_loader) {
   auto node = make_object<RPCRunnerNode>();
   node->key = key;
   node->host = host;
@@ -170,6 +212,7 @@ RPCRunner::RPCRunner(const String& key, const String& host, int port, int priori
   node->cooldown_interval = cooldown_interval;
   node->enable_cpu_cache_flush = enable_cpu_cache_flush;
   node->device = device;
+  node->module_loader = module_loader;
   data_ = std::move(node);
 }
 
@@ -178,7 +221,7 @@ Array<MeasureResult> RPCRunnerNode::Run(const Array<MeasureInput>& inputs,
   if (const auto* f = runtime::Registry::Get("auto_scheduler.rpc_runner.run")) {
     Array<MeasureResult> results =
         (*f)(inputs, build_results, key, host, port, priority, n_parallel, timeout, number, repeat,
-             min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, verbose, device);
+             min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, verbose, device, module_loader);
     return results;
   } else {
     LOG(FATAL) << "auto_scheduler.rpc_runner.run is not registered. "
@@ -395,6 +438,29 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ProgramMeasurer")
       return ProgramMeasurer(builder, runner, callbacks, verbose, max_continuous_error);
     });
 
+TVM_REGISTER_GLOBAL("micro.AutoSchedulerModuleLoader")
+    .set_body_typed([](String template_project_dir, String west_cmd, String board, String project_type,
+                        int config_main_stack_size, int workspace_size_bytes, bool config_memc, bool config_sys_heap_big_only, bool verbose) {
+      return AutoSchedulerModuleLoader(
+        template_project_dir,
+        west_cmd,
+        board,
+        project_type,
+        config_main_stack_size,
+        workspace_size_bytes,
+        config_memc,
+        config_sys_heap_big_only,
+        verbose
+      );
+    });
+
+TVM_REGISTER_GLOBAL("auto_scheduler.AutoSchedulerModuleLoaderInit")
+    .set_body_typed([](const AutoSchedulerModuleLoader& module_loader, 
+                        String key, String host, int port, int priority, int timeout, 
+                        BuildResult build_res){
+      return module_loader -> init_remote_lib(key, host, port, priority, timeout, build_res);
+    });
+
 TVM_REGISTER_GLOBAL("auto_scheduler.ProgramBuilderBuild")
     .set_body_typed([](const ProgramBuilder& builder, const Array<MeasureInput>& inputs,
                        int verbose) { return builder->Build(inputs, verbose); });
@@ -405,8 +471,8 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ProgramRunnerRun")
                        int verbose) { return runner->Run(inputs, build_results, verbose); });
 
 TVM_REGISTER_GLOBAL("auto_scheduler.LocalBuilder")
-    .set_body_typed([](int timeout, int n_parallel, const String& build_func) {
-      return LocalBuilder(timeout, n_parallel, build_func);
+    .set_body_typed([](int timeout, int n_parallel, bool disable_vectorize, const String& build_func) {
+      return LocalBuilder(timeout, n_parallel, disable_vectorize, build_func);
     });
 
 TVM_REGISTER_GLOBAL("auto_scheduler.LocalRunner")
@@ -419,9 +485,9 @@ TVM_REGISTER_GLOBAL("auto_scheduler.LocalRunner")
 TVM_REGISTER_GLOBAL("auto_scheduler.RPCRunner")
     .set_body_typed([](const String& key, const String& host, int port, int priority,
                        int n_parallel, int timeout, int number, int repeat, int min_repeat_ms,
-                       double cooldown_interval, bool enable_cpu_cache_flush, int device) {
+                       double cooldown_interval, bool enable_cpu_cache_flush, int device, AutoSchedulerModuleLoader module_loader) {
       return RPCRunner(key, host, port, priority, n_parallel, timeout, number, repeat,
-                       min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, device);
+                       min_repeat_ms, cooldown_interval, enable_cpu_cache_flush, device, module_loader);
     });
 
 }  // namespace auto_scheduler

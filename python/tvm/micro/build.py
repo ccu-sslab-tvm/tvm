@@ -25,6 +25,10 @@ import enum
 from pathlib import Path
 import shutil
 
+import tvm
+from . import _ffi_api
+from tvm.runtime import Object
+
 from typing import Union
 from .._ffi import libinfo
 from .. import rpc as _rpc
@@ -198,3 +202,72 @@ def autotvm_build_func():
 
 # A sentinel value for the output format.
 autotvm_build_func.output_format = ".model-library-format"
+
+
+class AutoSchedulerBase:
+    remote = None
+    system_lib = None
+
+
+@tvm._ffi.register_object("micro.AutoSchedulerModuleLoader")
+class AutoSchedulerModuleLoader(Object):
+    
+    def __init__(self, template_project_dir: str, project_options:dict):
+        self.__init_handle_by_constructor__(
+            _ffi_api.AutoSchedulerModuleLoader,
+            template_project_dir,
+            project_options['west_cmd'],
+            project_options['board'],
+            project_options['project_type'],
+            project_options['config_main_stack_size'],
+            project_options['workspace_size_bytes'],
+            project_options['config_memc'],
+            project_options['config_sys_heap_big_only'],
+            project_options['verbose'],
+        )
+
+
+@tvm._ffi.register_func("micro.AutoSchedulerModuleLoader.init_remote_lib")
+def init_remote_lib(device_key, host, port, priority, timeout, build_res,
+          template_project_dir, west_cmd, board, project_type, config_main_stack_size, workspace_size_bytes,
+          config_memc, config_sys_heap_big_only, verbose):
+
+    with open(build_res.filename, "rb") as build_file:
+        build_result_bin = build_file.read()
+
+    tracker = _rpc.connect_tracker(host, port)
+
+    _project_options = {
+        "west_cmd": west_cmd,
+        "board": board,
+        "project_type": project_type,
+        "config_main_stack_size": config_main_stack_size,
+        "workspace_size_bytes": workspace_size_bytes,
+        "config_memc": config_memc,
+        "config_sys_heap_big_only": config_sys_heap_big_only,
+        "verbose": verbose,
+    }
+    
+    AutoSchedulerBase.remote = tracker.request(
+        device_key,
+        priority=priority,
+        session_timeout=timeout,
+        session_constructor_args=[
+            "tvm.micro.compile_and_create_micro_session",
+            build_result_bin,
+            str(template_project_dir),
+            json.dumps(_project_options),
+            None,
+            False,
+        ],
+    )
+
+    AutoSchedulerBase.system_lib = AutoSchedulerBase.remote.get_function("runtime.SystemLib")()
+
+
+def auto_scheduler_build_func():
+    """A dummy build function which causes autotvm to use a different export format."""
+
+
+# A sentinel value for the output format.
+auto_scheduler_build_func.output_format = ".model-library-format"
