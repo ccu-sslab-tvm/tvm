@@ -44,6 +44,7 @@ from tvm.contrib import ndk, tar
 from tvm.contrib.popen_pool import PopenPoolExecutor, PopenWorker, StatusKind
 from tvm.driver import build_module
 from tvm.ir import transform
+from tvm.micro.build import AutoSchedulerBase, AutoSchedulerModuleLoader
 from tvm.runtime import Object, module, ndarray
 from tvm.target import Target
 
@@ -80,6 +81,10 @@ class BuildFunc:
 
     name = "default"
     build_func = tar.tar
+
+
+class AutoSchedulerRuntime:
+    runtime = None
 
 
 @tvm._ffi.register_object("auto_scheduler.MeasureCallback")
@@ -328,7 +333,7 @@ class LocalBuilder(ProgramBuilder):
         If is callable, use it as custom build function, expect lib_format field.
     """
 
-    def __init__(self, timeout=15, n_parallel=multiprocessing.cpu_count(), build_func="default"):
+    def __init__(self, timeout=15, n_parallel=multiprocessing.cpu_count(), disable_vectorize = False, build_func="default", runtime = None):
         if build_func == "default":
             BuildFunc.name = "default"
             BuildFunc.build_func = tar.tar
@@ -340,9 +345,11 @@ class LocalBuilder(ProgramBuilder):
             BuildFunc.build_func = build_func
         else:
             raise ValueError("Invalid build_func" + build_func)
+        
+        AutoSchedulerRuntime.runtime = runtime
 
         self.__init_handle_by_constructor__(
-            _ffi_api.LocalBuilder, timeout, n_parallel, BuildFunc.name
+            _ffi_api.LocalBuilder, timeout, n_parallel, disable_vectorize, BuildFunc.name
         )
 
 
@@ -472,6 +479,7 @@ class RPCRunner(ProgramRunner):
         cooldown_interval=0.0,
         enable_cpu_cache_flush=False,
         device=0,
+        module_loader=None,
     ):
         self.__init_handle_by_constructor__(
             _ffi_api.RPCRunner,
@@ -487,6 +495,7 @@ class RPCRunner(ProgramRunner):
             cooldown_interval,
             enable_cpu_cache_flush,
             device,
+            module_loader,
         )
 
         if check_remote(key, host, port, priority, timeout):
@@ -552,6 +561,7 @@ class LocalRPCMeasureContext:
         cooldown_interval=0.0,
         enable_cpu_cache_flush=False,
         device=0,
+        module_loader=None,
     ):
         # pylint: disable=import-outside-toplevel
         from tvm.rpc.server import Server
@@ -579,6 +589,7 @@ class LocalRPCMeasureContext:
             cooldown_interval,
             enable_cpu_cache_flush,
             device,
+            module_loader,
         )
         # Wait for the processes to start
         time.sleep(0.5)
@@ -605,7 +616,21 @@ class MeasureErrorNo(object):
     UNKNOWN_ERROR = 8  # Unknown error
 
 
-def _local_build_worker(inp_serialized, build_func, verbose):
+def _build_func_common(sch, args, target, runtime, disable_vectorize):
+    current_pass_context: transform.PassContext = (
+        transform.PassContext.current()
+    )
+    current_config = dict(current_pass_context.config)
+    build_option = {
+        "tir.disable_vectorize": disable_vectorize,
+    }
+    current_config.update(build_option)
+    with transform.PassContext(config = current_config):
+        func = build_module.build(sch, args, target=target, runtime=runtime)
+    return func
+
+
+def _local_build_worker(inp_serialized, disable_vectorize, build_func, verbose, runtime):
     tic = time.time()
     inp = MeasureInput.deserialize(inp_serialized)
     task = inp.task
@@ -629,9 +654,16 @@ def _local_build_worker(inp_serialized, build_func, verbose):
         filename = os.path.join(dirname, "tmp_func." + build_func.output_format)
 
         try:
-            with transform.PassContext().current():
-                func = build_module.build(sch, args, target=task.target)
-            func.export_library(filename, build_func)
+            func = _build_func_common(sch, args, target=task.target, runtime=runtime, disable_vectorize=disable_vectorize)
+
+            if build_func.output_format == ".model-library-format":
+                try:
+                    from tvm import micro
+                except ImportError:
+                    raise ImportError("Requires USE_MICRO")
+                micro.export_model_library_format(func, filename)
+            else:
+                func.export_library(filename, build_func)
         # pylint: disable=broad-except
         except Exception:
             error_no = MeasureErrorNo.COMPILE_HOST
@@ -662,13 +694,13 @@ def local_build_worker(args):
     res : BuildResult
         The build result of this Builder thread.
     """
-    inp, build_func, verbose = args
+    inp, disable_vectorize, build_func, verbose, runtime = args
 
-    return _local_build_worker(inp, build_func, verbose)
+    return _local_build_worker(inp, disable_vectorize, build_func, verbose, runtime)
 
 
 @tvm._ffi.register_func("auto_scheduler.local_builder.build")
-def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbose=1):
+def local_builder_build(inputs, timeout, n_parallel, disable_vectorize, build_func="default", verbose=1):
     """
     Build function of LocalBuilder to build the MeasureInputs to runnable modules.
 
@@ -698,7 +730,17 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
         n_parallel, timeout, reset_global_scope, (AutotvmGlobalScope.current,)
     )
     tuple_res = executor.map_with_error_catching(
-        local_build_worker, [(i.serialize(), BuildFunc.build_func, verbose) for i in inputs]
+        local_build_worker,
+        [
+            (
+                i.serialize(),
+                disable_vectorize,
+                BuildFunc.build_func,
+                verbose,
+                AutoSchedulerRuntime.runtime
+            )
+        for i in inputs
+        ]
     )
 
     results = []
@@ -1083,17 +1125,24 @@ def _rpc_run(
     enable_cpu_cache_flush,
     verbose,
     device,
+    module_loader,
 ):
     inp = MeasureInput.deserialize(inp_serialized)
     tic = time.time()
     error_no = 0
     error_msg = None
     try:
-        # upload built module
-        remote = request_remote(key, host, port, priority, timeout)
-        remote.upload(build_res.filename)
-        func = remote.load_module(os.path.split(build_res.filename)[1])
-        dev = remote.device(str(inp.task.target), device)
+        if module_loader != None:
+            _ffi_api.AutoSchedulerModuleLoaderInit(module_loader, key, host, port, priority, timeout, build_res)
+            remote = AutoSchedulerBase.remote
+            func = AutoSchedulerBase.system_lib
+            dev = remote.device(str(inp.task.target))
+        else:
+            # upload built module
+            remote = request_remote(key, host, port, priority, timeout)
+            remote.upload(build_res.filename)
+            func = remote.load_module(os.path.split(build_res.filename)[1])
+            dev = remote.device(str(inp.task.target), device)
         # Limitation:
         # We can not get PackFunction directly in the remote mode as it is wrapped
         # under the std::function. We could lift the restriction later once we fold
@@ -1145,10 +1194,11 @@ def _rpc_run(
             costs = time_f(*loc_args).results
 
             # clean up remote files
-            remote.remove(build_res.filename)
-            remote.remove(os.path.splitext(build_res.filename)[0] + ".so")
-            remote.remove("")
-            dev.free_raw_stream(stream)
+            if not isinstance(module_loader, AutoSchedulerModuleLoader):
+                remote.remove(build_res.filename)
+                remote.remove(os.path.splitext(build_res.filename)[0] + ".so")
+                remote.remove("")
+                dev.free_raw_stream(stream)
         # pylint: disable=broad-except
         except Exception:
             dev.free_raw_stream(stream)
@@ -1182,7 +1232,7 @@ def _rpc_run_worker(args):
     res : MeasureResult
         The measure result of this Runner thread.
     """
-    _, build_res, _, _, _, _, _, timeout, _, _, _, _, _, verbose, _ = args
+    _, build_res, _, _, _, _, _, timeout, _, _, _, _, _, verbose, _, _ = args
     if build_res.error_no != MeasureErrorNo.NO_ERROR:
         return (
             (MAX_FLOAT,),
@@ -1226,6 +1276,7 @@ def rpc_runner_run(
     enable_cpu_cache_flush=False,
     verbose=1,
     device=0,
+    module_loader=None
 ):
     """Run function of RPCRunner to test the performance of the input BuildResults.
 
@@ -1304,6 +1355,7 @@ def rpc_runner_run(
                 enable_cpu_cache_flush,
                 verbose,
                 device,
+                module_loader,
             )
             for inp, build_res in zip(inputs, build_results)
         ],
