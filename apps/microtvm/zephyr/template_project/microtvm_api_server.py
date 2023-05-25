@@ -723,7 +723,7 @@ class Handler(server.ProjectAPIHandler):
                     cmake_f.write(f"target_compile_definitions(app PUBLIC -DFVP=1)\n")
 
         self._create_prj_conf(
-            project_dir, zephyr_board, project_type, config_main_stack_size, config_memc, config_sys_heap_big_only, cmsis_path, verbose, use_fvp
+            project_dir, zephyr_board, project_type, config_main_stack_size, config_memc, config_sys_heap_big_only, verbose, cmsis_path, use_fvp
         )
 
         # Populate crt-config.h
