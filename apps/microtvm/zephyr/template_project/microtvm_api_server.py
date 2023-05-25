@@ -426,6 +426,7 @@ class Handler(server.ProjectAPIHandler):
         config_memc: bool,
         config_sys_heap_big_only: bool,
         config_led: bool,
+        cmsis_path:str,
         use_fvp: bool,
     ):
         with open(project_dir / "prj.conf", "w") as f:
@@ -472,6 +473,24 @@ class Handler(server.ProjectAPIHandler):
                 f.write(f"CONFIG_MAIN_STACK_SIZE={config_main_stack_size}\n" "\n")
 
             f.write("# For random number generation.\n" "CONFIG_TEST_RANDOM_GENERATOR=y\n")
+
+            if cmsis_path is not None:
+                f.write(
+                    "\n# Enable CMSIS_NN Library.\n"
+                    "CONFIG_NEWLIB_LIBC=y\n"
+                    "CONFIG_CMSIS_DSP=y\n"
+                    "CONFIG_CMSIS_NN=y\n"
+                    "CONFIG_CMSIS_NN_ACTIVATION=y\n"
+                    "CONFIG_CMSIS_NN_BASICMATH=y\n"
+                    "CONFIG_CMSIS_NN_CONCATENATION=y\n"
+                    "CONFIG_CMSIS_NN_CONVOLUTION=y\n"
+                    "CONFIG_CMSIS_NN_FULLYCONNECTED=y\n"
+                    "CONFIG_CMSIS_NN_NNSUPPORT=y\n"
+                    "CONFIG_CMSIS_NN_POOLING=y\n"
+                    "CONFIG_CMSIS_NN_RESHAPE=y\n"
+                    "CONFIG_CMSIS_NN_SOFTMAX=y\n"
+                    "CONFIG_CMSIS_NN_SVD=y\n"
+                )
 
             f.write("\n# Extra prj.conf directives\n")
             for line, board_list in self.EXTRA_PRJ_CONF_DIRECTIVES.items():
@@ -704,7 +723,7 @@ class Handler(server.ProjectAPIHandler):
                     cmake_f.write(f"target_compile_definitions(app PUBLIC -DFVP=1)\n")
 
         self._create_prj_conf(
-            project_dir, zephyr_board, project_type, config_main_stack_size, config_memc, config_sys_heap_big_only, verbose, use_fvp
+            project_dir, zephyr_board, project_type, config_main_stack_size, config_memc, config_sys_heap_big_only, cmsis_path, verbose, use_fvp
         )
 
         # Populate crt-config.h
