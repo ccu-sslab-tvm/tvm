@@ -27,7 +27,7 @@ function(generate_crt_config platform output_path)
   set(TVM_CRT_MAX_STRLEN_PARAM_NAME 80)
 
   if("${platform}" STREQUAL "zephyr")
-    set(TVM_CRT_MAX_PACKET_SIZE_BYTES 512)
+    set(TVM_CRT_MAX_PACKET_SIZE_BYTES 2*1024)
   elseif("${platform}" STREQUAL "arduino")
     set(TVM_CRT_MAX_PACKET_SIZE_BYTES 8*1024)
   endif()
