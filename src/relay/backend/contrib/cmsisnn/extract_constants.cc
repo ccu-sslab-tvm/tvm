@@ -95,8 +95,56 @@ class ExtractConstantsMutator : public MixedModeMutator {
     Array<Expr> new_call_args;
     for (auto& arg : call->args) {
       if (auto* constant = arg.as<ConstantNode>()) {
-        new_caller_args.push_back(arg);
-        new_call_args.push_back(Var(gen_var_name(), constant->tensor_type()));
+        int var_n = call->args[0]->type_as<TensorTypeNode>()->shape[0].as<tvm::IntImmNode>()->value;
+        int var_w = call->args[0]->type_as<TensorTypeNode>()->shape[1].as<tvm::IntImmNode>()->value;
+        int var_h = call->args[0]->type_as<TensorTypeNode>()->shape[2].as<tvm::IntImmNode>()->value;
+        int var_c = call->args[0]->type_as<TensorTypeNode>()->shape[3].as<tvm::IntImmNode>()->value;
+        std::vector<int64_t> var_shape { var_n, var_w, var_h, var_c };
+        int const_w = 1;
+        int const_h = 1;
+        int const_c = 1;
+
+        if(arg->type_as<TensorTypeNode>()->shape.size() == 2)
+        {
+          const_h = arg->type_as<TensorTypeNode>()->shape[0].as<tvm::IntImmNode>()->value;
+          const_c = arg->type_as<TensorTypeNode>()->shape[1].as<tvm::IntImmNode>()->value;
+        }
+        else if(arg->type_as<TensorTypeNode>()->shape.size() == 4)
+        {
+          const_w = arg->type_as<TensorTypeNode>()->shape[1].as<tvm::IntImmNode>()->value;
+          const_h = arg->type_as<TensorTypeNode>()->shape[2].as<tvm::IntImmNode>()->value;
+          const_c = arg->type_as<TensorTypeNode>()->shape[3].as<tvm::IntImmNode>()->value;
+        }
+
+        int w, h, c;
+        std::vector<int8_t> tensor_values;
+        for(w=0;w<var_w;w++)
+        {
+          if(var_w != const_w)
+            for(h=0;h<var_h;h++)
+            {
+              if(var_h != const_h)
+                for(c=0;c<const_c;c++)
+                  tensor_values.push_back(ToScalar(constant->data, c));
+              else
+                for(c=0;c<var_c;c++)
+                  tensor_values.push_back(ToScalar(constant->data, c + h * const_c));
+            }
+          else
+            for(h=0;h<var_h;h++)
+            {
+              if(var_h != const_h)
+                for(c=0;c<var_c;c++)
+                  tensor_values.push_back(ToScalar(constant->data, c + w * const_h * const_c));
+              else
+                for(c=0;c<var_c;c++)
+                  tensor_values.push_back(ToScalar(constant->data, c + h * const_c + w * const_h * const_c));
+            }
+        }
+
+        Constant tensor_constant = MakeConstantTensor<int8_t>(DataType::Int(8), var_shape, tensor_values);
+        new_caller_args.push_back(tensor_constant);
+        new_call_args.push_back(Var(gen_var_name(), call->args[0].as<VarNode>()->type_annotation));
         ++function_signature_id;
         new_constants_added = true;
         continue;

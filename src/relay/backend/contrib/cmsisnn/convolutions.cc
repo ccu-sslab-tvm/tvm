@@ -31,6 +31,7 @@ namespace cmsisnn {
 
 bool IsCMSISNNDepthwise(const Conv2DAttrs* conv2d_attrs, const Array<PrimExpr>& input_shape,
                         const Array<PrimExpr>& kernel_shape) {
+  return false;
   std::string kernel_layout = conv2d_attrs->kernel_layout.c_str();
   int kernel_pos_o = kernel_layout.find("O");
   int kernel_pos_i = kernel_layout.find("I");

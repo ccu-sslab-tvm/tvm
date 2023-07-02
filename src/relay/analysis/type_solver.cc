@@ -258,35 +258,9 @@ class TypeSolver::Unifier : public TypeFunctor<Type(const Type&, const Type&)> {
       return Type(nullptr);
     }
 
-    std::vector<std::tuple<size_t, IndexExpr, IndexExpr>> mismatches;
-
     ICHECK_EQ(tt1->shape.size(), tt2->shape.size());
     for (size_t i = 0; i < tt1->shape.size(); i++) {
-      auto dim = UnifyDim(tt1->shape[i], tt2->shape[i]);
-      if (!dim.defined()) {
-        // NB: We push an arbitrary dimension here so we can continue error propagation.
-        shape.push_back(tt1->shape[i]);
-        tvm::PrimExpr shape1 = tt1->shape[i];
-        tvm::PrimExpr shape2 = tt2->shape[i];
-        std::tuple<int, IndexExpr, IndexExpr> tuple = std::make_tuple(i, shape1, shape2);
-        mismatches.push_back(tuple);
-      } else {
-        shape.push_back(dim);
-      }
-    }
-
-    if (mismatches.size() != 0) {
-      auto err = Diagnostic::Error(this->span);
-      err << "The Relay type checker is unable to show the following types match:\n"
-          << "  " << PrettyPrint(tt1) << "\n"
-          << "  " << PrettyPrint(tt2) << "\n";
-      err << "In particular:\n";
-      for (auto mismatch : mismatches) {
-        err << "  dimension " << std::get<0>(mismatch) << " conflicts: " << std::get<1>(mismatch)
-            << " does not match " << std::get<2>(mismatch) << ".";
-      }
-      this->solver_->Emit(err);
-      return Type(nullptr);
+      shape.push_back(tt1->shape[i]);
     }
 
     return TensorType(shape, tt1->dtype);

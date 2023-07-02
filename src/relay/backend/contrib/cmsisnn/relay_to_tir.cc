@@ -17,7 +17,9 @@
  * under the License.
  */
 #include <tvm/ir/transform.h>
+#include <tvm/relay/attrs/image.h>
 #include <tvm/relay/attrs/nn.h>
+#include <tvm/relay/attrs/transform.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/transform.h>
 #include <tvm/tir/builtin.h>
@@ -127,6 +129,774 @@ class RelayToTIRVisitor : public MixedModeMutator {
 
   auto GetClipMinMax(const Call& clip_op) { return GetClipMinMax(clip_op->attrs.as<ClipAttrs>()); }
 
+  void Fiti_MAMM(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* add_call = expr.as<CallNode>();
+    const CallNode* mul_call = add_call->args[0].as<CallNode>();
+
+    Array<PrimExpr> input_shape = add_call->type_as<TensorTypeNode>()->shape;
+
+    const float add_input_scale = GetScalarFromConstant<float>(add_call->args[2]);
+    const int32_t add_input_zp = GetScalarFromConstant<int32_t>(add_call->args[3]);
+    const float add_const_scale = GetScalarFromConstant<float>(add_call->args[4]);
+    const int32_t add_const_zp = GetScalarFromConstant<int32_t>(add_call->args[5]);
+    float add_output_scale = GetScalarFromConstant<float>(add_call->args[6]);
+    int32_t add_output_zp = GetScalarFromConstant<int32_t>(add_call->args[7]);
+
+    const float mul_input_scale = GetScalarFromConstant<float>(mul_call->args[2]);
+    const int32_t mul_input_zp = GetScalarFromConstant<int32_t>(mul_call->args[3]);
+    const float mul_const_scale = GetScalarFromConstant<float>(mul_call->args[4]);
+    const int32_t mul_const_zp = GetScalarFromConstant<int32_t>(mul_call->args[5]);
+    float mul_output_scale = GetScalarFromConstant<float>(mul_call->args[6]);
+    int32_t mul_output_zp = GetScalarFromConstant<int32_t>(mul_call->args[7]);
+
+    const float max_input_scale = std::max(add_input_scale, add_const_scale);
+    const double twice_max_input_scale = 2 * static_cast<double>(max_input_scale);
+    const double scaled_add_input_scale =
+        static_cast<double>(add_input_scale) / twice_max_input_scale;
+    const double scaled_add_const_scale =
+        static_cast<double>(add_const_scale) / twice_max_input_scale;
+
+    double add_scale = twice_max_input_scale / ((1 << 20) * static_cast<double>(add_output_scale));
+    double mul_scale = static_cast<double>(mul_input_scale) * static_cast<double>(mul_const_scale) /
+                       static_cast<double>(mul_output_scale);
+
+    auto add_in_mult_shift_pair =
+        tvm::relay::qnn::GetFixedPointMultiplierShift(scaled_add_input_scale);
+    int32_t add_in_multiplier = std::get<0>(add_in_mult_shift_pair);
+    int32_t add_in_shift = std::get<1>(add_in_mult_shift_pair) + 20;
+    auto add_const_mult_shift_pair =
+        tvm::relay::qnn::GetFixedPointMultiplierShift(scaled_add_const_scale);
+    int32_t add_const_multiplier = std::get<0>(add_const_mult_shift_pair);
+    int32_t add_const_shift = std::get<1>(add_const_mult_shift_pair) + 20;
+    auto add_out_mult_shift_pair = tvm::relay::qnn::GetFixedPointMultiplierShift(add_scale);
+    int32_t add_out_multiplier = std::get<0>(add_out_mult_shift_pair);
+    int32_t add_out_shift = std::get<1>(add_out_mult_shift_pair);
+    auto mul_mult_shift_pair = tvm::relay::qnn::GetFixedPointMultiplierShift(mul_scale);
+    int32_t mul_multiplier = std::get<0>(mul_mult_shift_pair);
+    int32_t mul_shift = std::get<1>(mul_mult_shift_pair);
+
+    PrimExpr tensor_size = mul_call->type_as<TensorTypeNode>()->Size();
+
+    BufferCreator buffer_creator;
+    tir::Var input = buffer_creator.CreateBufferVar("input", DataType::Handle(8));
+    tir::Var Const_mul = buffer_creator.CreateBufferVar("Const_mul", DataType::Handle(8));
+    tir::Var Const_add = buffer_creator.CreateBufferVar("Const_add", DataType::Handle(8));
+    tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+
+    tvm::Array<PrimExpr> args = {
+        tir::StringImm("fiti_mamm"),
+        input,
+        Const_mul,
+        Const_add,
+        output,
+        ToArg(-mul_input_zp),
+        ToArg(-mul_const_zp),
+        ToArg(mul_output_zp),
+        ToArg(mul_multiplier),
+        ToArg(mul_shift),
+        ToArg(-add_input_zp),
+        ToArg(add_in_multiplier),
+        ToArg(add_in_shift),
+        ToArg(-add_const_zp),
+        ToArg(add_const_multiplier),
+        ToArg(add_const_shift),
+        ToArg(add_output_zp),
+        ToArg(add_out_multiplier),
+        ToArg(add_out_shift),
+        tensor_size,
+    };
+
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), args);
+  }
+
+  void Fiti_Concat(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* concat_call = expr.as<CallNode>();
+    const ConcatenateAttrs* concat_attrs = concat_call->attrs.as<ConcatenateAttrs>();
+    auto concat_input = concat_call->args[0]->type_as<TupleTypeNode>();
+    int input_num = concat_input->fields.size();
+    auto axis = concat_attrs->axis;
+
+    if (axis == -1) axis = concat_input->fields[0].as<TensorTypeNode>()->shape.size() - 1;
+
+    int input_args[4][2];
+    for (int i = 0; i < input_num; i++) {
+      int tmp = 1;
+      for (int j = 0; j < axis; j++)
+        tmp *= qnn::get_const_int(concat_input->fields[i].as<TensorTypeNode>()->shape[j]);
+      input_args[i][0] = tmp;
+      tmp = 1;
+      for (long unsigned int j = axis; j < concat_input->fields[i].as<TensorTypeNode>()->shape.size(); j++)
+        tmp *= qnn::get_const_int(concat_input->fields[i].as<TensorTypeNode>()->shape[j]);
+      input_args[i][1] = tmp;
+    }
+
+    BufferCreator buffer_creator;
+    tir::Var input1 = buffer_creator.CreateBufferVar("input1", DataType::Handle(8));
+    tir::Var input2 = buffer_creator.CreateBufferVar("input2", DataType::Handle(8));
+
+    tvm::Array<PrimExpr> args;
+    if (input_num == 3) {
+      tir::Var input3 = buffer_creator.CreateBufferVar("input3", DataType::Handle(8));
+      tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+      args = {
+          tir::StringImm("fiti_concat"),
+          input1,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[0][0]),
+          IntImm(DataType::Int(32), input_args[0][1]),
+          input2,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[1][0]),
+          IntImm(DataType::Int(32), input_args[1][1]),
+          input3,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[2][0]),
+          IntImm(DataType::Int(32), input_args[2][1]),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          output,
+          IntImm(DataType::Int(32), input_num),
+      };
+    } else if (input_num == 4) {
+      tir::Var input3 = buffer_creator.CreateBufferVar("input3", DataType::Handle(8));
+      tir::Var input4 = buffer_creator.CreateBufferVar("input4", DataType::Handle(8));
+      tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+      args = {
+          tir::StringImm("fiti_concat"),
+          input1,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[0][0]),
+          IntImm(DataType::Int(32), input_args[0][1]),
+          input2,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[1][0]),
+          IntImm(DataType::Int(32), input_args[1][1]),
+          input3,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[2][0]),
+          IntImm(DataType::Int(32), input_args[2][1]),
+          input4,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[3][0]),
+          IntImm(DataType::Int(32), input_args[3][1]),
+          output,
+          IntImm(DataType::Int(32), input_num),
+      };
+    } else {
+      tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+      args = {
+          tir::StringImm("fiti_concat"),
+          input1,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[0][0]),
+          IntImm(DataType::Int(32), input_args[0][1]),
+          input2,
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), 1),
+          IntImm(DataType::Int(32), input_args[1][0]),
+          IntImm(DataType::Int(32), input_args[1][1]),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          IntImm(DataType::Int(32), 0),
+          output,
+          IntImm(DataType::Int(32), input_num),
+      };
+    }
+
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), args);
+  }
+
+  void Fiti_Slice(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* reshape_call = expr.as<CallNode>();
+    const CallNode* slice_call = reshape_call->args[0].as<CallNode>();
+    const StridedSliceAttrs* slice_attrs = slice_call->attrs.as<StridedSliceAttrs>();
+
+    Array<PrimExpr> input_shape = slice_call->args[0]->type_as<TensorTypeNode>()->shape;
+    auto begin = slice_attrs->begin.value()[3];
+    auto end = slice_attrs->end.value()[3];
+
+    BufferCreator buffer_creator;
+    tir::Var input = buffer_creator.CreateBufferVar("input", DataType::Handle(8));
+    tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+
+    tvm::Array<PrimExpr> args = {
+        tir::StringImm("fiti_slice"),
+        input,
+        output,
+        ToArg(qnn::get_const_int(begin)),
+        ToArg(qnn::get_const_int(end)),
+        ToArg(qnn::get_const_int(input_shape[1])),
+        ToArg(qnn::get_const_int(input_shape[2])),
+        ToArg(qnn::get_const_int(input_shape[3])),
+    };
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), args);
+  }
+
+  void Fiti_Requant(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* requant_call = expr.as<CallNode>();
+    Array<PrimExpr> input_shape = requant_call->type_as<TensorTypeNode>()->shape;
+    int32_t input_size = 1;
+    for (size_t i = 1; i < input_shape.size(); i++)
+      input_size *= qnn::get_const_int(input_shape[i]);
+    int32_t in_offset = GetScalarFromConstant<int32_t>(requant_call->args[2]);
+    int32_t out_offset = GetScalarFromConstant<int32_t>(requant_call->args[4]);
+    float in_scale = GetScalarFromConstant<float>(requant_call->args[1]);
+    float out_scale = GetScalarFromConstant<float>(requant_call->args[3]);
+    auto mult_shift_pair = tvm::relay::qnn::GetFixedPointMultiplierShift(
+        static_cast<double>(in_scale) / static_cast<double>(out_scale));
+    int32_t multiplier = std::get<0>(mult_shift_pair);
+    int32_t shift = std::get<1>(mult_shift_pair);
+
+    BufferCreator buffer_creator;
+    tir::Var input = buffer_creator.CreateBufferVar("input", DataType::Handle(8));
+    tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+
+    tvm::Array<PrimExpr> args = {
+        tir::StringImm("fiti_requant"),        input,
+        IntImm(DataType::Int(32), input_size), IntImm(DataType::Int(32), -in_offset),
+        IntImm(DataType::Int(32), out_offset), IntImm(DataType::Int(32), -128),
+        IntImm(DataType::Int(32), 127),        IntImm(DataType::Int(32), multiplier),
+        IntImm(DataType::Int(32), shift),      output,
+    };
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), args);
+  }
+
+  void Fiti_Resize2d(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* resize2d_call = expr.as<CallNode>();
+    const VarNode* input_Var = resize2d_call->args[0].as<VarNode>();
+    const Resize2DAttrs* resize2d_attrs = resize2d_call->attrs.as<Resize2DAttrs>();
+    Array<PrimExpr> input_shape = input_Var->type_as<TensorTypeNode>()->shape;
+
+    BufferCreator buffer_creator;
+    tir::Var input = buffer_creator.CreateBufferVar("input", DataType::Handle(8));
+    tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+
+    tvm::Array<PrimExpr> args = {
+        tir::StringImm("fiti_resize2d"),
+        input,
+        IntImm(DataType::Int(32), qnn::get_const_int(input_shape[1])),
+        IntImm(DataType::Int(32), qnn::get_const_int(input_shape[3])),
+        IntImm(DataType::Int(32), qnn::get_const_int(resize2d_attrs->size[0])),
+        output,
+    };
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), args);
+  }
+
+  void Fiti_Sigmoid(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* reshape_call = NULL;
+    const CallNode* quant_call = NULL;
+    if (expr.as<CallNode>()->op.as<OpNode>()->name == "reshape") {
+      reshape_call = expr.as<CallNode>();
+      quant_call = reshape_call->args[0].as<CallNode>();
+    } else
+      quant_call = expr.as<CallNode>();
+
+    const CallNode* sigmoid_call = quant_call->args[0].as<CallNode>();
+    const CallNode* dequant_call = sigmoid_call->args[0].as<CallNode>();
+    float input_scale = GetScalarFromConstant<float>(dequant_call->args[1]);
+    int32_t input_zero_point = GetScalarFromConstant<int32_t>(dequant_call->args[2]);
+    float output_scale = GetScalarFromConstant<float>(quant_call->args[1]);
+    int32_t output_zero_point = GetScalarFromConstant<int32_t>(quant_call->args[2]);
+
+    Array<PrimExpr> input_shape = dequant_call->type_as<TensorTypeNode>()->shape;
+    int32_t input_size = qnn::get_const_int(input_shape[1]) * qnn::get_const_int(input_shape[2]) *
+                         qnn::get_const_int(input_shape[3]);
+
+    BufferCreator buffer_creator;
+    tir::Var input = buffer_creator.CreateBufferVar("input", DataType::Handle(8));
+    tir::Var output = buffer_creator.CreateBufferVar("output", DataType::Handle(8));
+
+    tvm::Array<PrimExpr> args = {
+        tir::StringImm("fiti_sigmoid"),
+        input,
+        ToArg(input_size),
+        FloatImm(DataType::Float(32), input_scale),
+        ToArg(-input_zero_point),
+        FloatImm(DataType::Float(32), output_scale),
+        ToArg(output_zero_point),
+        output,
+    };
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), args);
+  }
+
+  void fiti_reduce_transaction1(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* clip_call1 = nullptr;
+    const CallNode* requantize_call1 = nullptr;
+    const CallNode* bias_add_call1 = nullptr;
+    const CallNode* conv2d_call1 = nullptr;
+    const CallNode* clip_call2 = nullptr;
+    const CallNode* requantize_call2 = nullptr;
+    const CallNode* bias_add_call2 = nullptr;
+    const CallNode* conv2d_call2 = nullptr;
+    const CallNode* clip_call3 = nullptr;
+    const CallNode* requantize_call3 = nullptr;
+    const CallNode* bias_add_call3 = nullptr;
+    const CallNode* conv2d_call3 = nullptr;
+    const CallNode* final_call = expr.as<CallNode>();
+    const OpNode* final_op = final_call->op.as<OpNode>();
+
+    if (final_op->name == "clip") {
+      clip_call3 = final_call;
+      requantize_call3 = clip_call3->args[0].as<CallNode>();
+    } else if (final_op->name == "qnn.requantize") {
+      if (final_call->args[0].as<CallNode>()->op.as<OpNode>()->name == "clip") {
+        clip_call3 = final_call->args[0].as<CallNode>();
+        requantize_call3 = clip_call3->args[0].as<CallNode>();
+      } else
+        requantize_call3 = final_call;
+    }
+
+    const CallNode* requantize3_input = requantize_call3->args[0].as<CallNode>();
+    const OpNode* requantize3_input_op = requantize3_input->op.as<OpNode>();
+    if (requantize3_input_op->name == "nn.bias_add") {
+      bias_add_call3 = requantize3_input;
+      conv2d_call3 = bias_add_call3->args[0].as<CallNode>();
+    } else
+      conv2d_call3 = requantize3_input;
+
+    if ((conv2d_call3->args[0]).as<CallNode>()->op.as<OpNode>()->name == "clip") {
+      clip_call2 = (conv2d_call3->args[0]).as<CallNode>();
+      requantize_call2 = (clip_call2->args[0]).as<CallNode>();
+    } else
+      requantize_call2 = (conv2d_call3->args[0]).as<CallNode>();
+
+    const CallNode* requantize2_input = (requantize_call2->args[0]).as<CallNode>();
+    const OpNode* requantize2_input_op = requantize2_input->op.as<OpNode>();
+    if (requantize2_input_op->name == "nn.bias_add") {
+      bias_add_call2 = requantize2_input;
+      conv2d_call2 = (bias_add_call2->args[0]).as<CallNode>();
+    } else
+      conv2d_call2 = requantize2_input;
+
+    if ((conv2d_call2->args[0]).as<CallNode>()->op.as<OpNode>()->name == "clip") {
+      clip_call1 = (conv2d_call2->args[0]).as<CallNode>();
+      requantize_call1 = (clip_call1->args[0]).as<CallNode>();
+    } else
+      requantize_call1 = (conv2d_call2->args[0]).as<CallNode>();
+
+    const CallNode* requantize1_input = (requantize_call1->args[0]).as<CallNode>();
+    const OpNode* requantize1_input_op = requantize1_input->op.as<OpNode>();
+    if (requantize1_input_op->name == "nn.bias_add") {
+      bias_add_call1 = requantize1_input;
+      conv2d_call1 = (bias_add_call1->args[0]).as<CallNode>();
+    } else
+      conv2d_call1 = requantize1_input;
+
+    const int filter_scale_pos = 3;
+    const int input_scale_pos = bias_add_call2 ? 5 : 4;
+    BufferCreator buffer_creator;
+
+    tir::Var input1 = buffer_creator.CreateBufferVar("input1", DataType::Handle(8));
+    tir::Var filter1 = buffer_creator.CreateBufferVar("filter1", DataType::Handle(8));
+    tir::Var multiplier1 = buffer_creator.CreateBufferVar("multiplier1", DataType::Handle(32));
+    tir::Var bias1 = buffer_creator.CreateBufferVar("bias1", DataType::Handle(32));
+    tir::Var shift1 = buffer_creator.CreateBufferVar("shift1", DataType::Handle(32));
+    // tir::Var output1 = buffer_creator.CreateBufferVar("output1", DataType::Handle(8));
+
+    // tir::Var input2 = buffer_creator.CreateBufferVar("input2", DataType::Handle(8));
+    tir::Var filter2 = buffer_creator.CreateBufferVar("filter2", DataType::Handle(8));
+    tir::Var multiplier2 = buffer_creator.CreateBufferVar("multiplier2", DataType::Handle(32));
+    tir::Var bias2 = buffer_creator.CreateBufferVar("bias2", DataType::Handle(32));
+    tir::Var shift2 = buffer_creator.CreateBufferVar("shift2", DataType::Handle(32));
+    // tir::Var output2 = buffer_creator.CreateBufferVar("output2", DataType::Handle(8));
+
+    // tir::Var input3 = buffer_creator.CreateBufferVar("input3", DataType::Handle(8));
+    tir::Var filter3 = buffer_creator.CreateBufferVar("filter3", DataType::Handle(8));
+    tir::Var multiplier3 = buffer_creator.CreateBufferVar("multiplier3", DataType::Handle(32));
+    tir::Var bias3 = buffer_creator.CreateBufferVar("bias3", DataType::Handle(32));
+    tir::Var shift3 = buffer_creator.CreateBufferVar("shift3", DataType::Handle(32));
+    tir::Var output3 = buffer_creator.CreateBufferVar("output3", DataType::Handle(8));
+
+    // Relay function contains input_scale and filter_scale as function parameters at the following
+    // locations in the global partitioned function for Conv2D
+    skip_call_args_.insert(filter_scale_pos);
+    skip_call_args_.insert(input_scale_pos);
+    skip_call_args_.insert(filter_scale_pos + 6);
+    skip_call_args_.insert(input_scale_pos + 6);
+    skip_call_args_.insert(filter_scale_pos + 6 * 2);
+    skip_call_args_.insert(input_scale_pos + 6 * 2);
+    // Individual arguments to the structs arguments of the CMSIS-NN API are filled into call_extern
+    // https://github.com/ARM-software/CMSIS_5/blob/def6f800f95661eb3451d317f7d0dde504f6020d/CMSIS/NN/Source/ConvolutionFunctions/arm_convolve_wrapper_s8.c#L50
+
+    // prepare cmsis_nn_conv_params
+    const Conv2DAttrs* conv2d_attrs3 = conv2d_call3->attrs.as<Conv2DAttrs>();
+    int32_t input_offset3 = -GetScalarFromConstant<int32_t>(conv2d_call3->args[2]);
+    int32_t output_offset3 = GetScalarFromConstant<int32_t>(requantize_call3->args[4]);
+    int32_t stride_w3 = qnn::get_const_int(conv2d_attrs3->strides[1]);
+    int32_t stride_h3 = qnn::get_const_int(conv2d_attrs3->strides[0]);
+    int32_t padding_w3 = qnn::get_const_int(conv2d_attrs3->padding[1]);
+    int32_t padding_h3 = qnn::get_const_int(conv2d_attrs3->padding[0]);
+    int32_t dilation_w3 = qnn::get_const_int(conv2d_attrs3->dilation[1]);
+    int32_t dilation_h3 = qnn::get_const_int(conv2d_attrs3->dilation[0]);
+    int32_t out_channels3 = qnn::get_const_int(conv2d_attrs3->channels);
+    std::string kernel_layout3 = conv2d_attrs3->kernel_layout.c_str();
+    int32_t clip_min3 = std::numeric_limits<int8_t>::min();
+    int32_t clip_max3 = std::numeric_limits<int8_t>::max();
+    if (clip_call3) {
+      const ClipAttrs* clip_attrs3 = clip_call3->attrs.as<ClipAttrs>();
+      clip_min3 = clip_attrs3->a_min;
+      clip_max3 = clip_attrs3->a_max;
+    }
+
+    const Conv2DAttrs* conv2d_attrs2 = conv2d_call2->attrs.as<Conv2DAttrs>();
+    int32_t input_offset2 = -GetScalarFromConstant<int32_t>(conv2d_call2->args[2]);
+    int32_t output_offset2 = GetScalarFromConstant<int32_t>(requantize_call2->args[4]);
+    int32_t stride_w2 = qnn::get_const_int(conv2d_attrs2->strides[1]);
+    int32_t stride_h2 = qnn::get_const_int(conv2d_attrs2->strides[0]);
+    int32_t padding_w2 = qnn::get_const_int(conv2d_attrs2->padding[1]);
+    int32_t padding_h2 = qnn::get_const_int(conv2d_attrs2->padding[0]);
+    int32_t dilation_w2 = qnn::get_const_int(conv2d_attrs2->dilation[1]);
+    int32_t dilation_h2 = qnn::get_const_int(conv2d_attrs2->dilation[0]);
+    int32_t out_channels2 = qnn::get_const_int(conv2d_attrs2->channels);
+    std::string kernel_layout2 = conv2d_attrs2->kernel_layout.c_str();
+    int32_t clip_min2 = std::numeric_limits<int8_t>::min();
+    int32_t clip_max2 = std::numeric_limits<int8_t>::max();
+    if (clip_call2) {
+      const ClipAttrs* clip_attrs2 = clip_call2->attrs.as<ClipAttrs>();
+      clip_min2 = clip_attrs2->a_min;
+      clip_max2 = clip_attrs2->a_max;
+    }
+
+    const Conv2DAttrs* conv2d_attrs1 = conv2d_call1->attrs.as<Conv2DAttrs>();
+    int32_t input_offset1 = -GetScalarFromConstant<int32_t>(conv2d_call1->args[2]);
+    int32_t output_offset1 = GetScalarFromConstant<int32_t>(requantize_call1->args[4]);
+    int32_t stride_w1 = qnn::get_const_int(conv2d_attrs1->strides[1]);
+    int32_t stride_h1 = qnn::get_const_int(conv2d_attrs1->strides[0]);
+    int32_t padding_w1 = qnn::get_const_int(conv2d_attrs1->padding[1]);
+    int32_t padding_h1 = qnn::get_const_int(conv2d_attrs1->padding[0]);
+    int32_t dilation_w1 = qnn::get_const_int(conv2d_attrs1->dilation[1]);
+    int32_t dilation_h1 = qnn::get_const_int(conv2d_attrs1->dilation[0]);
+    int32_t out_channels1 = qnn::get_const_int(conv2d_attrs1->channels);
+    std::string kernel_layout1 = conv2d_attrs1->kernel_layout.c_str();
+    int32_t clip_min1 = std::numeric_limits<int8_t>::min();
+    int32_t clip_max1 = std::numeric_limits<int8_t>::max();
+    if (clip_call1) {
+      const ClipAttrs* clip_attrs1 = clip_call1->attrs.as<ClipAttrs>();
+      clip_min1 = clip_attrs1->a_min;
+      clip_max1 = clip_attrs1->a_max;
+    }
+
+    tvm::Array<PrimExpr> scalar_args = {ToArg(input_offset1),
+                                        ToArg(output_offset1),
+                                        ToArg(stride_w1),
+                                        ToArg(stride_h1),
+                                        ToArg(padding_w1),
+                                        ToArg(padding_h1),
+                                        ToArg(dilation_w1),
+                                        ToArg(dilation_h1),
+                                        ToArg(clip_min1),
+                                        ToArg(clip_max1),
+                                        ToArg(-1),
+                                        ToArg(input_offset2),
+                                        ToArg(output_offset2),
+                                        ToArg(stride_w2),
+                                        ToArg(stride_h2),
+                                        ToArg(padding_w2),
+                                        ToArg(padding_h2),
+                                        ToArg(dilation_w2),
+                                        ToArg(dilation_h2),
+                                        ToArg(clip_min2),
+                                        ToArg(clip_max2),
+                                        ToArg(-1),
+                                        ToArg(input_offset3),
+                                        ToArg(output_offset3),
+                                        ToArg(stride_w3),
+                                        ToArg(stride_h3),
+                                        ToArg(padding_w3),
+                                        ToArg(padding_h3),
+                                        ToArg(dilation_w3),
+                                        ToArg(dilation_h3),
+                                        ToArg(clip_min3),
+                                        ToArg(clip_max3),
+                                        ToArg(-1)};
+
+    // CMSIS-NN data structure "cmsis_nn_dims" for ifm expects input layout as NHWC
+    // This is the same layout we expect in Relay
+    Array<PrimExpr> input_shape3 = conv2d_call3->args[0]->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> filter_shape3 = conv2d_call3->args[1]->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> bias_shape3{1, 1, 1, out_channels3};
+    Array<PrimExpr> output_shape3 = conv2d_call3->type_as<TensorTypeNode>()->shape;
+
+    Array<PrimExpr> input_shape2 = conv2d_call2->args[0]->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> filter_shape2 = (conv2d_call2->args[1])->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> bias_shape2{1, 1, 1, out_channels2};
+    Array<PrimExpr> output_shape2 = conv2d_call2->type_as<TensorTypeNode>()->shape;
+
+    Array<PrimExpr> input_shape1 = conv2d_call1->args[0]->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> filter_shape1 = conv2d_call1->args[1]->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> bias_shape1{1, 1, 1, out_channels1};
+    Array<PrimExpr> output_shape1 = conv2d_call1->type_as<TensorTypeNode>()->shape;
+
+    std::string cmsisnn_api = "fiti_convolve_wrapper_s83";
+    tvm::Array<PrimExpr> call_ext_args = {tir::StringImm(cmsisnn_api),
+                                          input1,
+                                          filter1,
+                                          multiplier1,
+                                          bias1,
+                                          shift1,
+                                          filter2,
+                                          multiplier2,
+                                          bias2,
+                                          shift2,
+                                          filter3,
+                                          multiplier3,
+                                          bias3,
+                                          shift3,
+                                          output3};
+
+    scalar_args = tvm::runtime::Concat(scalar_args, input_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, filter_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, bias_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, output_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, input_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, filter_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, bias_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, output_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, input_shape3);
+    scalar_args = tvm::runtime::Concat(scalar_args, filter_shape3);
+    scalar_args = tvm::runtime::Concat(scalar_args, bias_shape3);
+    scalar_args = tvm::runtime::Concat(scalar_args, output_shape3);
+    call_ext_args = tvm::runtime::Concat(call_ext_args, scalar_args);
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), call_ext_args);
+  }
+
+  void fiti_reduce_transaction2(const GlobalVar& global_var, const Expr& expr) {
+    const CallNode* clip_call1 = nullptr;
+    const CallNode* requantize_call1 = nullptr;
+    const CallNode* bias_add_call1 = nullptr;
+    const CallNode* conv2d_call1 = nullptr;
+    const CallNode* pad_call1 = nullptr;
+    const CallNode* clip_call2 = nullptr;
+    const CallNode* requantize_call2 = nullptr;
+    const CallNode* bias_add_call2 = nullptr;
+    const CallNode* conv2d_call2 = nullptr;
+    const CallNode* pad_call2 = nullptr;
+    const CallNode* final_call = expr.as<CallNode>();
+    const OpNode* final_op = final_call->op.as<OpNode>();
+
+    if (final_op->name == "clip") {
+      clip_call2 = final_call;
+      requantize_call2 = clip_call2->args[0].as<CallNode>();
+    } else {
+      if (final_op->name == "qnn.requantize") {
+        if (final_call->args[0].as<CallNode>()->op.as<OpNode>()->name == "clip") {
+          clip_call2 = final_call->args[0].as<CallNode>();
+          requantize_call2 = clip_call2->args[0].as<CallNode>();
+        } else
+          requantize_call2 = final_call;
+      } else
+        requantize_call2 = final_call;
+    }
+
+    const CallNode* requantize2_input = requantize_call2->args[0].as<CallNode>();
+    const OpNode* requantize2_input_op = requantize2_input->op.as<OpNode>();
+    if (requantize2_input_op->name == "nn.bias_add") {
+      bias_add_call2 = requantize2_input;
+      conv2d_call2 = bias_add_call2->args[0].as<CallNode>();
+    } else
+      conv2d_call2 = requantize2_input;
+
+    if ((conv2d_call2->args[0]).as<CallNode>()->op.as<OpNode>()->name == "clip") {
+      clip_call1 = (conv2d_call2->args[0]).as<CallNode>();
+      requantize_call1 = (clip_call1->args[0]).as<CallNode>();
+    } else {
+      if ((conv2d_call2->args[0]).as<CallNode>()->op.as<OpNode>()->name == "nn.pad") {
+        pad_call2 = conv2d_call2->args[0].as<CallNode>();
+        clip_call1 = pad_call2->args[0].as<CallNode>();
+        requantize_call1 = clip_call1->args[0].as<CallNode>();
+      }
+    }
+
+    const CallNode* requantize1_input = (requantize_call1->args[0]).as<CallNode>();
+    const OpNode* requantize1_input_op = requantize1_input->op.as<OpNode>();
+    if (requantize1_input_op->name == "nn.bias_add") {
+      bias_add_call1 = requantize1_input;
+      conv2d_call1 = (bias_add_call1->args[0]).as<CallNode>();
+    } else
+      conv2d_call1 = requantize1_input;
+
+    if (conv2d_call1->args[0]->IsInstance<CallNode>() &&
+        (conv2d_call1->args[0]).as<CallNode>()->op.as<OpNode>()->name == "nn.pad")
+      pad_call1 = conv2d_call1->args[0].as<CallNode>();
+
+    const int filter_scale_pos = 3;
+    const int input_scale_pos = bias_add_call2 ? 5 : 4;
+    BufferCreator buffer_creator;
+
+    tir::Var input1 = buffer_creator.CreateBufferVar("input1", DataType::Handle(8));
+    tir::Var filter1 = buffer_creator.CreateBufferVar("filter1", DataType::Handle(8));
+    tir::Var multiplier1 = buffer_creator.CreateBufferVar("multiplier1", DataType::Handle(32));
+    tir::Var bias1 = buffer_creator.CreateBufferVar("bias1", DataType::Handle(32));
+    tir::Var shift1 = buffer_creator.CreateBufferVar("shift1", DataType::Handle(32));
+    // tir::Var output1 = buffer_creator.CreateBufferVar("output1", DataType::Handle(8));
+
+    // tir::Var input2 = buffer_creator.CreateBufferVar("input2", DataType::Handle(8));
+    tir::Var filter2 = buffer_creator.CreateBufferVar("filter2", DataType::Handle(8));
+    tir::Var multiplier2 = buffer_creator.CreateBufferVar("multiplier2", DataType::Handle(32));
+    tir::Var bias2 = buffer_creator.CreateBufferVar("bias2", DataType::Handle(32));
+    tir::Var shift2 = buffer_creator.CreateBufferVar("shift2", DataType::Handle(32));
+    tir::Var output2 = buffer_creator.CreateBufferVar("output2", DataType::Handle(8));
+
+    // Relay function contains input_scale and filter_scale as function parameters at the following
+    // locations in the global partitioned function for Conv2D
+    skip_call_args_.insert(filter_scale_pos);
+    skip_call_args_.insert(input_scale_pos);
+    skip_call_args_.insert(filter_scale_pos + 6);
+    skip_call_args_.insert(input_scale_pos + 6);
+    // Individual arguments to the structs arguments of the CMSIS-NN API are filled into call_extern
+    // https://github.com/ARM-software/CMSIS_5/blob/def6f800f95661eb3451d317f7d0dde504f6020d/CMSIS/NN/Source/ConvolutionFunctions/arm_convolve_wrapper_s8.c#L50
+
+    // prepare cmsis_nn_conv_params
+    const Conv2DAttrs* conv2d_attrs2 = conv2d_call2->attrs.as<Conv2DAttrs>();
+    int32_t input_offset2 = -GetScalarFromConstant<int32_t>(conv2d_call2->args[2]);
+    int32_t output_offset2 = GetScalarFromConstant<int32_t>(requantize_call2->args[4]);
+    int32_t stride_w2 = qnn::get_const_int(conv2d_attrs2->strides[1]);
+    int32_t stride_h2 = qnn::get_const_int(conv2d_attrs2->strides[0]);
+    int32_t padding_w2 = qnn::get_const_int(conv2d_attrs2->padding[1]);
+    int32_t padding_h2 = qnn::get_const_int(conv2d_attrs2->padding[0]);
+
+    if (pad_call2) {
+      const PadAttrs* pad_attrs2 = (conv2d_call2->args[0]).as<CallNode>()->attrs.as<PadAttrs>();
+      padding_w2 = qnn::get_const_int(pad_attrs2->pad_width[2][0]);
+      padding_h2 = qnn::get_const_int(pad_attrs2->pad_width[1][0]);
+    }
+
+    int32_t dilation_w2 = qnn::get_const_int(conv2d_attrs2->dilation[1]);
+    int32_t dilation_h2 = qnn::get_const_int(conv2d_attrs2->dilation[0]);
+    int32_t out_channels2 = qnn::get_const_int(conv2d_attrs2->channels);
+    std::string kernel_layout2 = conv2d_attrs2->kernel_layout.c_str();
+    int32_t clip_min2 = std::numeric_limits<int8_t>::min();
+    int32_t clip_max2 = std::numeric_limits<int8_t>::max();
+    if (clip_call2) {
+      const ClipAttrs* clip_attrs2 = clip_call2->attrs.as<ClipAttrs>();
+      clip_min2 = clip_attrs2->a_min;
+      clip_max2 = clip_attrs2->a_max;
+    }
+
+    const Conv2DAttrs* conv2d_attrs1 = conv2d_call1->attrs.as<Conv2DAttrs>();
+    int32_t input_offset1 = -GetScalarFromConstant<int32_t>(conv2d_call1->args[2]);
+    int32_t output_offset1 = GetScalarFromConstant<int32_t>(requantize_call1->args[4]);
+    int32_t stride_w1 = qnn::get_const_int(conv2d_attrs1->strides[1]);
+    int32_t stride_h1 = qnn::get_const_int(conv2d_attrs1->strides[0]);
+    int32_t padding_w1 = qnn::get_const_int(conv2d_attrs1->padding[1]);
+    int32_t padding_h1 = qnn::get_const_int(conv2d_attrs1->padding[0]);
+
+    if (pad_call1) {
+      const PadAttrs* pad_attrs1 = (conv2d_call1->args[0]).as<CallNode>()->attrs.as<PadAttrs>();
+      padding_w1 = qnn::get_const_int(pad_attrs1->pad_width[2][0]);
+      padding_h1 = qnn::get_const_int(pad_attrs1->pad_width[1][0]);
+    }
+
+    int32_t dilation_w1 = qnn::get_const_int(conv2d_attrs1->dilation[1]);
+    int32_t dilation_h1 = qnn::get_const_int(conv2d_attrs1->dilation[0]);
+    int32_t out_channels1 = qnn::get_const_int(conv2d_attrs1->channels);
+    std::string kernel_layout1 = conv2d_attrs1->kernel_layout.c_str();
+    int32_t clip_min1 = std::numeric_limits<int8_t>::min();
+    int32_t clip_max1 = std::numeric_limits<int8_t>::max();
+    if (clip_call1) {
+      const ClipAttrs* clip_attrs1 = clip_call1->attrs.as<ClipAttrs>();
+      clip_min1 = clip_attrs1->a_min;
+      clip_max1 = clip_attrs1->a_max;
+    }
+
+    tvm::Array<PrimExpr> scalar_args = {ToArg(input_offset1),
+                                        ToArg(output_offset1),
+                                        ToArg(stride_w1),
+                                        ToArg(stride_h1),
+                                        ToArg(padding_w1),
+                                        ToArg(padding_h1),
+                                        ToArg(dilation_w1),
+                                        ToArg(dilation_h1),
+                                        ToArg(clip_min1),
+                                        ToArg(clip_max1),
+                                        ToArg(-1),
+                                        ToArg(input_offset2),
+                                        ToArg(output_offset2),
+                                        ToArg(stride_w2),
+                                        ToArg(stride_h2),
+                                        ToArg(padding_w2),
+                                        ToArg(padding_h2),
+                                        ToArg(dilation_w2),
+                                        ToArg(dilation_h2),
+                                        ToArg(clip_min2),
+                                        ToArg(clip_max2),
+                                        ToArg(-1)};
+
+    // CMSIS-NN data structure "cmsis_nn_dims" for ifm expects input layout as NHWC
+    // This is the same layout we expect in Relay
+    Array<PrimExpr> input_shape2 = conv2d_call2->args[0]->type_as<TensorTypeNode>()->shape;
+    if (pad_call2)
+      input_shape2 =
+          ((conv2d_call2->args[0]).as<CallNode>()->args[0])->type_as<TensorTypeNode>()->shape;
+
+    // CMSIS-NN data structure "cmsis_nn_dims" for weights expects following layouts
+    // OHWI for Conv2D and IHWO for Depthwise convolutions
+    Array<PrimExpr> filter_shape2 = (conv2d_call2->args[1])->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> bias_shape2{1, 1, 1, out_channels2};
+    Array<PrimExpr> output_shape2 = conv2d_call2->type_as<TensorTypeNode>()->shape;
+
+    Array<PrimExpr> input_shape1 = conv2d_call1->args[0]->type_as<TensorTypeNode>()->shape;
+    if (pad_call1)
+      input_shape1 =
+          ((conv2d_call1->args[0]).as<CallNode>()->args[0])->type_as<TensorTypeNode>()->shape;
+
+    Array<PrimExpr> filter_shape1 = conv2d_call1->args[1]->type_as<TensorTypeNode>()->shape;
+    Array<PrimExpr> bias_shape1{1, 1, 1, out_channels1};
+    Array<PrimExpr> output_shape1 = conv2d_call1->type_as<TensorTypeNode>()->shape;
+
+    std::string cmsisnn_api = "fiti_convolve_wrapper_s82";
+
+    tvm::Array<PrimExpr> call_ext_args = {tir::StringImm(cmsisnn_api),
+                                          input1,
+                                          filter1,
+                                          multiplier1,
+                                          bias1,
+                                          shift1,
+                                          filter2,
+                                          multiplier2,
+                                          bias2,
+                                          shift2,
+                                          output2};
+
+    scalar_args = tvm::runtime::Concat(scalar_args, input_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, filter_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, bias_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, output_shape1);
+    scalar_args = tvm::runtime::Concat(scalar_args, input_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, filter_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, bias_shape2);
+    scalar_args = tvm::runtime::Concat(scalar_args, output_shape2);
+    call_ext_args = tvm::runtime::Concat(call_ext_args, scalar_args);
+
+    CreatePrimFuncForExtern(global_var, buffer_creator.GetPrimFuncParams(),
+                            buffer_creator.GetBufferMap(), call_ext_args);
+  }
+
   void EmitConv2D(const GlobalVar& global_var, const Expr& expr) {
     const CallNode* clip_call = nullptr;
     const CallNode* requantize_call = nullptr;
@@ -138,7 +908,14 @@ class RelayToTIRVisitor : public MixedModeMutator {
       clip_call = final_call;
       requantize_call = clip_call->args[0].as<CallNode>();
     } else {
-      requantize_call = final_call;
+      if (final_op->name == "qnn.requantize") {
+        if (final_call->args[0].as<CallNode>()->op.as<OpNode>()->name == "clip") {
+          clip_call = final_call->args[0].as<CallNode>();
+          requantize_call = clip_call->args[0].as<CallNode>();
+        } else
+          requantize_call = final_call;
+      } else
+        requantize_call = final_call;
     }
     const CallNode* requantize_input = requantize_call->args[0].as<CallNode>();
     const OpNode* requantize_input_op = requantize_input->op.as<OpNode>();
@@ -201,6 +978,12 @@ class RelayToTIRVisitor : public MixedModeMutator {
     int32_t stride_h = qnn::get_const_int(conv2d_attrs->strides[0]);
     int32_t padding_w = qnn::get_const_int(conv2d_attrs->padding[1]);
     int32_t padding_h = qnn::get_const_int(conv2d_attrs->padding[0]);
+    if (conv2d_call->args[0]->IsInstance<CallNode>() &&
+        conv2d_call->args[0].as<CallNode>()->op.as<OpNode>()->name == "nn.pad") {
+      const PadAttrs* pad_attrs = conv2d_call->args[0].as<CallNode>()->attrs.as<PadAttrs>();
+      padding_w = qnn::get_const_int(pad_attrs->pad_width[2][0]);
+      padding_h = qnn::get_const_int(pad_attrs->pad_width[1][0]);
+    }
     int32_t dilation_w = qnn::get_const_int(conv2d_attrs->dilation[1]);
     int32_t dilation_h = qnn::get_const_int(conv2d_attrs->dilation[0]);
     int32_t out_channels = qnn::get_const_int(conv2d_attrs->channels);
@@ -216,6 +999,9 @@ class RelayToTIRVisitor : public MixedModeMutator {
     // CMSIS-NN data structure "cmsis_nn_dims" for ifm expects input layout as NHWC
     // This is the same layout we expect in Relay
     Array<PrimExpr> input_shape = conv2d_call->args[0]->type_as<TensorTypeNode>()->shape;
+    if (conv2d_call->args[0]->IsInstance<CallNode>() &&
+        conv2d_call->args[0].as<CallNode>()->op.as<OpNode>()->name == "nn.pad")
+      input_shape = conv2d_call->args[0].as<CallNode>()->args[0]->type_as<TensorTypeNode>()->shape;
     int32_t input_n = qnn::get_const_int(input_shape[0]);
     int32_t input_h = qnn::get_const_int(input_shape[1]);
     int32_t input_c = qnn::get_const_int(input_shape[3]);
@@ -571,6 +1357,8 @@ class RelayToTIRVisitor : public MixedModeMutator {
   void EmitMul(const GlobalVar& global_var, const Expr& expr) {
     const auto& pattern = ParseBinaryElementwiseOpClipPattern(expr);
     Call mul_call = pattern.binary_op;
+    if (expr.as<CallNode>()->op.as<OpNode>()->name == "qnn.requantize")
+      mul_call = GetRef<Call>(expr.as<CallNode>()->args[0].as<CallNode>());
     const auto bit_width = mul_call->type_as<TensorTypeNode>()->dtype.bits();
     const auto [output_min, output_max] =
         pattern.clip_op ? GetClipMinMax(pattern.clip_op.value()) : GetIntMinMax(bit_width);
@@ -579,8 +1367,13 @@ class RelayToTIRVisitor : public MixedModeMutator {
     const int32_t input_0_zero_point = GetScalarFromConstant<int32_t>(mul_call->args[3]);
     const float input_1_scale = GetScalarFromConstant<float>(mul_call->args[4]);
     const int32_t input_1_zero_point = GetScalarFromConstant<int32_t>(mul_call->args[5]);
-    const float output_scale = GetScalarFromConstant<float>(mul_call->args[6]);
-    const int32_t output_zero_point = GetScalarFromConstant<int32_t>(mul_call->args[7]);
+    float output_scale = GetScalarFromConstant<float>(mul_call->args[6]);
+    int32_t output_zero_point = GetScalarFromConstant<int32_t>(mul_call->args[7]);
+
+    if (expr.as<CallNode>()->op.as<OpNode>()->name == "qnn.requantize") {
+      output_scale = GetScalarFromConstant<float>(expr.as<CallNode>()->args[3]);
+      output_zero_point = GetScalarFromConstant<int32_t>(expr.as<CallNode>()->args[4]);
+    }
 
     double quantized_multiplier = static_cast<double>(input_0_scale) *
                                   static_cast<double>(input_1_scale) /
@@ -623,6 +1416,8 @@ class RelayToTIRVisitor : public MixedModeMutator {
   void EmitAdd(const GlobalVar& global_var, const Expr& expr) {
     const auto& pattern = ParseBinaryElementwiseOpClipPattern(expr);
     Call add_call = pattern.binary_op;
+    if (expr.as<CallNode>()->op.as<OpNode>()->name == "qnn.requantize")
+      add_call = GetRef<Call>(expr.as<CallNode>()->args[0].as<CallNode>());
     const auto bit_width = add_call->type_as<TensorTypeNode>()->dtype.bits();
 
     const auto [output_min, output_max] =
@@ -632,13 +1427,18 @@ class RelayToTIRVisitor : public MixedModeMutator {
     const int32_t input_0_zero_point = GetScalarFromConstant<int32_t>(add_call->args[3]);
     const float input_1_scale = GetScalarFromConstant<float>(add_call->args[4]);
     const int32_t input_1_zero_point = GetScalarFromConstant<int32_t>(add_call->args[5]);
-    const float output_scale = GetScalarFromConstant<float>(add_call->args[6]);
-    const int32_t output_zero_point = GetScalarFromConstant<int32_t>(add_call->args[7]);
+    float output_scale = GetScalarFromConstant<float>(add_call->args[6]);
+    int32_t output_zero_point = GetScalarFromConstant<int32_t>(add_call->args[7]);
 
     const int32_t left_shift = (bit_width == 16) ? 15 : 20;
     const int32_t input_0_offset = -input_0_zero_point;
     const int32_t input_1_offset = -input_1_zero_point;
     const int32_t output_offset = output_zero_point;
+
+    if (expr.as<CallNode>()->op.as<OpNode>()->name == "qnn.requantize") {
+      output_scale = GetScalarFromConstant<float>(expr.as<CallNode>()->args[3]);
+      output_zero_point = GetScalarFromConstant<int32_t>(expr.as<CallNode>()->args[4]);
+    }
 
     const float max_input_scale = std::max(input_0_scale, input_1_scale);
     const double twice_max_input_scale = 2 * static_cast<double>(max_input_scale);
@@ -777,7 +1577,7 @@ class RelayToTIRVisitor : public MixedModeMutator {
 
         if (comp_name == "cmsis-nn.qnn_softmax") {
           EmitSoftMax(new_global_var, composite_func->body);
-        } else if (comp_name == "cmsis-nn.qnn_mul") {
+        } else if (comp_name == "cmsis-nn.qnn_mul" or comp_name == "cmsis-nn.qnn_mul2") {
           EmitMul(new_global_var, composite_func->body);
         } else if (comp_name == "cmsis-nn.qnn_add") {
           EmitAdd(new_global_var, composite_func->body);
@@ -788,6 +1588,22 @@ class RelayToTIRVisitor : public MixedModeMutator {
         } else if (comp_name == "cmsis-nn.qnn_avg_pool2d" ||
                    comp_name == "cmsis-nn.qnn_max_pool2d") {
           EmitPool2D(new_global_var, composite_func->body, comp_name.value());
+        } else if (comp_name == "cmsis-nn.fiti_sigmoid") {
+          Fiti_Sigmoid(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_reduce_transaction1") {
+          fiti_reduce_transaction1(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_reduce_transaction2") {
+          fiti_reduce_transaction2(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_resize2d") {
+          Fiti_Resize2d(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_requant") {
+          Fiti_Requant(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_concat") {
+          Fiti_Concat(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_mamm") {
+          Fiti_MAMM(new_global_var, composite_func->body);
+        } else if (comp_name == "cmsis-nn.fiti_slice") {
+          Fiti_Slice(new_global_var, composite_func->body);
         } else {
           return CallToFuncWithoutCompilerAttr(new_global_var, GetRef<Call>(call),
                                                GetRef<Function>(func));
