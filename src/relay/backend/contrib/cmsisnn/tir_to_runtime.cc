@@ -116,16 +116,22 @@ class CodeGenCMSISNN : public codegen::CodeGenCHost {
     }
     std::string cmsis_func_name = op->args[0].as<StringImmNode>()->value;
     if (cmsis_func_name == "arm_softmax_s8" || cmsis_func_name == "arm_elementwise_mul_s8" ||
-        cmsis_func_name == "arm_elementwise_add_s8" ||
-        cmsis_func_name == "arm_elementwise_mul_s16" ||
-        cmsis_func_name == "arm_elementwise_add_s16") {
+        cmsis_func_name == "arm_elementwise_add_s8" || cmsis_func_name == "fiti_sigmoid" || cmsis_func_name == "fiti_resize2d" || cmsis_func_name == "fiti_concat" || 
+        cmsis_func_name == "fiti_requant" || cmsis_func_name == "fiti_add" || cmsis_func_name == "fiti_mul" || cmsis_func_name == "fiti_max_pool" || cmsis_func_name == "fiti_slice") {
       CodeGenC::VisitExpr_(op, os);
     } else if (cmsis_func_name == "arm_convolve_wrapper_s8" ||
                cmsis_func_name == "arm_convolve_wrapper_s16" ||
                cmsis_func_name == "arm_depthwise_conv_wrapper_s8" ||
                cmsis_func_name == "arm_depthwise_conv_wrapper_s16") {
       EmitConv2D(op);
-    } else if (cmsis_func_name == "arm_fully_connected_s8" ||
+    } 
+    else if (cmsis_func_name == "fiti_convolve_wrapper_s82")
+      FITI_reduce_transaction2(op);
+    else if (cmsis_func_name == "fiti_convolve_wrapper_s83")
+      FITI_reduce_transaction1(op);
+    else if(cmsis_func_name == "fiti_mamm")
+      FITI_MAMM(op);
+    else if (cmsis_func_name == "arm_fully_connected_s8" ||
                cmsis_func_name == "arm_fully_connected_s16") {
       EmitFullyConnected(op);
     } else if (cmsis_func_name == "arm_avgpool_s8" || cmsis_func_name == "arm_avgpool_s16" ||
@@ -142,6 +148,32 @@ class CodeGenCMSISNN : public codegen::CodeGenCHost {
     os << "cmsis_nn_context " << struct_name << "= {" << context_buffer.name << ","
        << context_buffer.size << "};\n";
     return struct_name;
+  }
+
+  std::string FITIConvParams(std::ostream& os, Conv2DParams params, std::string no) {
+    std::string struct_name = "cmsis_nn_conv_params";
+    std::string instance_name = "conv_params";
+    instance_name += no;
+    if (params.depth_multiplier != -1) {
+      struct_name = "cmsis_nn_dw_conv_params";
+    }
+    PrintIndent();
+    os << "cmsis_nn_tile stride" << no << " = {" << params.stride_w << "," << params.stride_h << "};\n";
+    PrintIndent();
+    os << "cmsis_nn_tile padding" << no << " = {" << params.padding_w << "," << params.padding_h << "};\n";
+    PrintIndent();
+    os << "cmsis_nn_tile dilation" << no << " = {" << params.dilation_w << "," << params.dilation_h << "};\n";
+    PrintIndent();
+    os << "cmsis_nn_activation activation" << no << " = {" << params.clip_min << "," << params.clip_max
+       << "};\n";
+    PrintIndent();
+    os << struct_name << " " << instance_name << " = {" << params.input_offset << ", "
+       << params.output_offset;
+    if (params.depth_multiplier != -1) {
+      os << ", " << params.depth_multiplier;
+    }
+    os << ", stride" << no << ", padding" << no << ", dilation" << no << ", activation" << no << "};\n";
+    return instance_name;
   }
 
   /*!  * \brief Emits cmsis_nn_conv_params struct */
@@ -198,6 +230,15 @@ class CodeGenCMSISNN : public codegen::CodeGenCHost {
     PrintIndent();
     os << struct_name << " " << instance_name << " = {stride, padding, activation};\n";
     return instance_name;
+  }
+
+  std::string FITIQuantParams(std::ostream& os, std::string multiplier, std::string shift, std::string no) 
+  {
+    std::string struct_name = "quant_params";
+    struct_name += no;
+    PrintIndent();
+    os << "cmsis_nn_per_channel_quant_params " << struct_name << " = {" << multiplier << ", " << shift << "};\n";
+    return struct_name;
   }
 
   /*!  * \brief Emits cmsis_nn_per_channel_quant_params struct */
@@ -303,6 +344,258 @@ class CodeGenCMSISNN : public codegen::CodeGenCHost {
     return dims;
   }
 
+  void FITI_MAMM(const CallNode* op)
+  {
+    std::string cmsis_func_name = op->args[0].as<StringImmNode>()->value;
+    // extract buffer names from call_extern
+    int arg_id = 0;
+    std::string input_data = VarNameFromArg(op, ++arg_id);
+    std::string Const_mul = VarNameFromArg(op, ++arg_id);
+    std::string Const_add = VarNameFromArg(op, ++arg_id);
+    std::string output = VarNameFromArg(op, ++arg_id);
+    int mul_input_zp = ValueFromArg(op, ++arg_id);
+    int mul_const_zp = ValueFromArg(op, ++arg_id);
+    int mul_output_zp = ValueFromArg(op, ++arg_id);
+    int mul_multiplier = ValueFromArg(op, ++arg_id);
+    int mul_shift = ValueFromArg(op, ++arg_id);
+    int add_input_zp = ValueFromArg(op, ++arg_id);
+    int add_in_multiplier = ValueFromArg(op, ++arg_id);
+    int add_in_shift = ValueFromArg(op, ++arg_id);
+    int add_const_zp = ValueFromArg(op, ++arg_id);
+    int add_const_multiplier = ValueFromArg(op, ++arg_id);
+    int add_const_shift = ValueFromArg(op, ++arg_id);
+    int add_output_zp = ValueFromArg(op, ++arg_id);
+    int add_out_multiplier = ValueFromArg(op, ++arg_id);
+    int add_out_shift = ValueFromArg(op, ++arg_id);
+    int size = ValueFromArg(op, ++arg_id);
+
+    // Emit CMSIS-NN API
+    PrintIndent();
+    //stream << cmsis_func_name << "(";
+    stream << "fiti_mul(";
+    stream << input_data << ", ";
+    stream << Const_mul << ", ";
+    stream << mul_input_zp << ", ";
+    stream << "1073741824, 1, ";
+    stream << mul_const_zp << ", ";
+    stream << "1073741824, 1, ";
+    stream << output << ", ";
+    stream << mul_output_zp << ", ";
+    stream << mul_multiplier << ", ";
+    stream << mul_shift << ", ";
+    stream << "-128, 127, ";
+    stream << size << ");\n";
+
+    PrintIndent();
+    //stream << cmsis_func_name << "(";
+    stream << "fiti_add(";
+    stream << output << ", ";
+    stream << Const_add << ", ";
+    stream << add_input_zp << ", ";
+    stream << add_in_multiplier << ", ";
+    stream << add_in_shift << ", ";
+    stream << add_const_zp << ", ";
+    stream << add_const_multiplier << ", ";
+    stream << add_const_shift << ", ";
+    stream << output << ", ";
+    stream << add_output_zp << ", ";
+    stream << add_out_multiplier << ", ";
+    stream << add_out_shift << ", ";
+    stream << "-128, 127, ";
+    stream << size << ");\n";
+  }
+
+  void FITI_reduce_transaction1(const CallNode* op) 
+  {
+    std::string cmsis_func_name = op->args[0].as<StringImmNode>()->value;
+    // extract buffer names from call_extern
+    int arg_id = 0;
+    
+    std::string input_data1 = VarNameFromArg(op, ++arg_id);
+    std::string filter_data1 = VarNameFromArg(op, ++arg_id);
+    std::string multiplier1 = VarNameFromArg(op, ++arg_id);
+    std::string bias_data1 = VarNameFromArg(op, ++arg_id);
+    std::string shift1 = VarNameFromArg(op, ++arg_id);
+    //std::string output_data1 = VarNameFromArg(op, ++arg_id);
+    //std::string input_data2 = VarNameFromArg(op, ++arg_id);
+    std::string filter_data2 = VarNameFromArg(op, ++arg_id);
+    std::string multiplier2 = VarNameFromArg(op, ++arg_id);
+    std::string bias_data2 = VarNameFromArg(op, ++arg_id);
+    std::string shift2 = VarNameFromArg(op, ++arg_id);
+    //std::string output_data2 = VarNameFromArg(op, ++arg_id);
+    //std::string input_data3 = VarNameFromArg(op, ++arg_id);
+    std::string filter_data3 = VarNameFromArg(op, ++arg_id);
+    std::string multiplier3 = VarNameFromArg(op, ++arg_id);
+    std::string bias_data3 = VarNameFromArg(op, ++arg_id);
+    std::string shift3 = VarNameFromArg(op, ++arg_id);
+    std::string output_data3 = VarNameFromArg(op, ++arg_id);
+
+    Conv2DParams conv2d_params1 = extract_conv2d_params(op, ++arg_id);
+    Conv2DParams conv2d_params2 = extract_conv2d_params(op, arg_id+11);
+    Conv2DParams conv2d_params3 = extract_conv2d_params(op, arg_id+22);
+    CMSISNNDims input_dims1 = extract_buffer_dims(op, arg_id+33);
+    CMSISNNDims filter_dims1 = extract_buffer_dims(op, arg_id+37);
+    CMSISNNDims bias_dims1 = extract_buffer_dims(op, arg_id+41);
+    CMSISNNDims output_dims1 = extract_buffer_dims(op, arg_id+45);
+    CMSISNNDims input_dims2 = extract_buffer_dims(op, arg_id+49);
+    CMSISNNDims filter_dims2 = extract_buffer_dims(op, arg_id+53);
+    CMSISNNDims bias_dims2 = extract_buffer_dims(op, arg_id+57);
+    CMSISNNDims output_dims2 = extract_buffer_dims(op, arg_id+61);
+    CMSISNNDims input_dims3 = extract_buffer_dims(op, arg_id+65);
+    CMSISNNDims filter_dims3 = extract_buffer_dims(op, arg_id+69);
+    CMSISNNDims bias_dims3 = extract_buffer_dims(op, arg_id+73);
+    CMSISNNDims output_dims3 = extract_buffer_dims(op, arg_id+77);
+
+    if(filter_dims1.c != input_dims1.c)
+    {
+      filter_dims1.h = std::sqrt(filter_dims1.c / input_dims1.c);
+      filter_dims1.w = std::sqrt(filter_dims1.c / input_dims1.c);
+      filter_dims1.c = input_dims1.c;
+    }
+
+    if(filter_dims2.c != input_dims2.c)
+    {
+      filter_dims2.h = std::sqrt(filter_dims2.c / input_dims2.c);
+      filter_dims2.w = std::sqrt(filter_dims2.c / input_dims2.c);
+      filter_dims2.c = input_dims2.c;
+    }
+
+    if(filter_dims3.c != input_dims3.c)
+    {
+      filter_dims3.h = std::sqrt(filter_dims3.c / input_dims3.c);
+      filter_dims3.w = std::sqrt(filter_dims3.c / input_dims3.c);
+      filter_dims3.c = input_dims3.c;
+    }
+
+    // Emit CMSIS-NN API arguments
+    std::string conv_params1 = FITIConvParams(stream, conv2d_params1, "1");
+    std::string quant_params1 = FITIQuantParams(stream, multiplier1, shift1, "1");
+    std::string input_dim1 = EmitCMSISNNDims(stream, "input1", input_dims1);
+    std::string filter_dim1 = EmitCMSISNNDims(stream, "filter1", filter_dims1);
+    std::string bias_dim1 = EmitCMSISNNDims(stream, "bias1", bias_dims1);
+    std::string output_dim1 = EmitCMSISNNDims(stream, "output1", output_dims1);
+
+    std::string conv_params2 = FITIConvParams(stream, conv2d_params2, "2");
+    std::string quant_params2 = FITIQuantParams(stream, multiplier2, shift2, "2");
+    std::string input_dim2 = EmitCMSISNNDims(stream, "input2", input_dims2);
+    std::string filter_dim2 = EmitCMSISNNDims(stream, "filter2", filter_dims2);
+    std::string bias_dim2 = EmitCMSISNNDims(stream, "bias2", bias_dims2);
+    std::string output_dim2 = EmitCMSISNNDims(stream, "output2", output_dims2);
+
+    std::string conv_params3 = FITIConvParams(stream, conv2d_params3, "3");
+    std::string quant_params3 = FITIQuantParams(stream, multiplier3, shift3, "3");
+    std::string input_dim3 = EmitCMSISNNDims(stream, "input3", input_dims3);
+    std::string filter_dim3 = EmitCMSISNNDims(stream, "filter3", filter_dims3);
+    std::string bias_dim3 = EmitCMSISNNDims(stream, "bias3", bias_dims3);
+    std::string output_dim3 = EmitCMSISNNDims(stream, "output3", output_dims3);
+
+    // Emit CMSIS-NN API
+    PrintIndent();
+    stream << "arm_status status = ";
+    //stream << cmsis_func_name << "(";
+    stream << "fiti_convolve_wrapper_s83(";
+    stream << input_data1 << ", ";
+    stream << "&" << conv_params1 << ", ";
+    stream << "&" << quant_params1 << ", ";
+    stream << "&" << input_dim1 << ", ";
+    stream << "&" << filter_dim1 << ", " << filter_data1 << ", ";
+    stream << "&" << bias_dim1 << ", " << bias_data1 << ", ";
+    stream << "&" << output_dim1 << ",\n";
+    stream << "&" << conv_params2 << ", ";
+    stream << "&" << quant_params2 << ", ";
+    stream << "&" << input_dim2 << ", ";
+    stream << "&" << filter_dim2 << ", " << filter_data2 << ", ";
+    stream << "&" << bias_dim2 << ", " << bias_data2 << ", ";
+    stream << "&" << output_dim2 << ",\n ";
+    stream << "&" << conv_params3 << ", ";
+    stream << "&" << quant_params3 << ", ";
+    stream << "&" << input_dim3 << ", ";
+    stream << "&" << filter_dim3 << ", " << filter_data3 << ", ";
+    stream << "&" << bias_dim3 << ", " << bias_data3 << ", ";
+    stream << "&" << output_dim3 << ", " << output_data3 << ");\n";
+    EmitErrorCheck();
+  }
+
+  void FITI_reduce_transaction2(const CallNode* op) 
+  {
+    std::string cmsis_func_name = op->args[0].as<StringImmNode>()->value;
+    // extract buffer names from call_extern
+    int arg_id = 0;
+    
+    std::string input_data1 = VarNameFromArg(op, ++arg_id);
+    std::string filter_data1 = VarNameFromArg(op, ++arg_id);
+    std::string multiplier1 = VarNameFromArg(op, ++arg_id);
+    std::string bias_data1 = VarNameFromArg(op, ++arg_id);
+    std::string shift1 = VarNameFromArg(op, ++arg_id);
+    //std::string output_data1 = VarNameFromArg(op, ++arg_id);
+    //std::string input_data2 = VarNameFromArg(op, ++arg_id);
+    std::string filter_data2 = VarNameFromArg(op, ++arg_id);
+    std::string multiplier2 = VarNameFromArg(op, ++arg_id);
+    std::string bias_data2 = VarNameFromArg(op, ++arg_id);
+    std::string shift2 = VarNameFromArg(op, ++arg_id);
+    std::string output_data2 = VarNameFromArg(op, ++arg_id);
+
+    Conv2DParams conv2d_params1 = extract_conv2d_params(op, ++arg_id);
+    Conv2DParams conv2d_params2 = extract_conv2d_params(op, arg_id+11);
+    CMSISNNDims input_dims1 = extract_buffer_dims(op, arg_id+22);
+    CMSISNNDims filter_dims1 = extract_buffer_dims(op, arg_id+26);
+    CMSISNNDims bias_dims1 = extract_buffer_dims(op, arg_id+30);
+    CMSISNNDims output_dims1 = extract_buffer_dims(op, arg_id+34);
+    CMSISNNDims input_dims2 = extract_buffer_dims(op, arg_id+38);
+    CMSISNNDims filter_dims2 = extract_buffer_dims(op, arg_id+42);
+    CMSISNNDims bias_dims2 = extract_buffer_dims(op, arg_id+46);
+    CMSISNNDims output_dims2 = extract_buffer_dims(op, arg_id+50);
+
+    if(filter_dims1.c != input_dims1.c)
+    {
+      filter_dims1.h = std::sqrt(filter_dims1.c / input_dims1.c);
+      filter_dims1.w = std::sqrt(filter_dims1.c / input_dims1.c);
+      filter_dims1.c = input_dims1.c;
+    }
+
+    if(filter_dims2.c != input_dims2.c)
+    {
+      filter_dims2.h = std::sqrt(filter_dims2.c / input_dims2.c);
+      filter_dims2.w = std::sqrt(filter_dims2.c / input_dims2.c);
+      filter_dims2.c = input_dims2.c;
+    }
+
+    // Emit CMSIS-NN API arguments
+    std::string conv_params1 = FITIConvParams(stream, conv2d_params1, "1");
+    std::string quant_params1 = FITIQuantParams(stream, multiplier1, shift1, "1");
+    std::string input_dim1 = EmitCMSISNNDims(stream, "input1", input_dims1);
+    std::string filter_dim1 = EmitCMSISNNDims(stream, "filter1", filter_dims1);
+    std::string bias_dim1 = EmitCMSISNNDims(stream, "bias1", bias_dims1);
+    std::string output_dim1 = EmitCMSISNNDims(stream, "output1", output_dims1);
+
+    std::string conv_params2 = FITIConvParams(stream, conv2d_params2, "2");
+    std::string quant_params2 = FITIQuantParams(stream, multiplier2, shift2, "2");
+    std::string input_dim2 = EmitCMSISNNDims(stream, "input2", input_dims2);
+    std::string filter_dim2 = EmitCMSISNNDims(stream, "filter2", filter_dims2);
+    std::string bias_dim2 = EmitCMSISNNDims(stream, "bias2", bias_dims2);
+    std::string output_dim2 = EmitCMSISNNDims(stream, "output2", output_dims2);
+
+    // Emit CMSIS-NN API
+    PrintIndent();
+    stream << "arm_status status = ";
+    //stream << cmsis_func_name << "(";
+    stream << "fiti_convolve_wrapper_s82(";
+    stream << input_data1 << ", ";
+    stream << "&" << conv_params1 << ", ";
+    stream << "&" << quant_params1 << ", ";
+    stream << "&" << input_dim1 << ", ";
+    stream << "&" << filter_dim1 << ", " << filter_data1 << ", ";
+    stream << "&" << bias_dim1 << ", " << bias_data1 << ", ";
+    stream << "&" << output_dim1 << ",\n";
+    stream << "&" << conv_params2 << ", ";
+    stream << "&" << quant_params2 << ", ";
+    stream << "&" << input_dim2 << ", ";
+    stream << "&" << filter_dim2 << ", " << filter_data2 << ", ";
+    stream << "&" << bias_dim2 << ", " << bias_data2 << ", ";
+    stream << "&" << output_dim2 << ", " << output_data2 << ");\n";
+    EmitErrorCheck();
+  }
+
   /*!  * \brief Emits CMSIS-NN APIs for every call_extern comprising convolution */
   void EmitConv2D(const CallNode* op) {
     // Position of various arguments relative to buffers in the call_extern
@@ -344,6 +637,13 @@ class CodeGenCMSISNN : public codegen::CodeGenCHost {
     CMSISNNDims filter_dims = extract_buffer_dims(op, filter_dim_pos);
     CMSISNNDims bias_dims = extract_buffer_dims(op, bias_dim_pos);
     CMSISNNDims output_dims = extract_buffer_dims(op, output_dim_pos);
+
+    if(filter_dims.c != input_dims.c)
+    {
+      filter_dims.h = std::sqrt(filter_dims.c / input_dims.c);
+      filter_dims.w = std::sqrt(filter_dims.c / input_dims.c);
+      filter_dims.c = input_dims.c;
+    }
 
     // Emit CMSIS-NN API arguments
     std::string context = EmitCMSISNNContext(stream, context_buffer);
