@@ -433,10 +433,14 @@ class Handler(server.ProjectAPIHandler):
             f.write(
                 "# For UART used from main().\n"
                 "CONFIG_RING_BUFFER=y\n"
-                "CONFIG_UART_CONSOLE=n\n"
                 "CONFIG_UART_INTERRUPT_DRIVEN=y\n"
-                "\n"
             )
+            if project_type == "host_driven":
+                f.write(
+                "CONFIG_UART_CONSOLE=n\n"
+                    "\n"
+                )
+
             if (
                 config_led
                 and not self._is_qemu(board, use_fvp)
@@ -446,7 +450,7 @@ class Handler(server.ProjectAPIHandler):
 
             f.write("# For TVMPlatformAbort().\n" "CONFIG_REBOOT=y\n" "\n")
 
-            if project_type == "host_driven":
+            if project_type == "host_driven" or project_type == "fiti_aot_standalone":
                 f.write(
                     "# For RPC server C++ bindings.\n"
                     "CONFIG_CPLUSPLUS=y\n"
@@ -513,6 +517,7 @@ class Handler(server.ProjectAPIHandler):
         "host_driven": "microtvm_rpc_server microtvm_rpc_common aot_executor_module aot_executor common",
         "aot_standalone_demo": "memory microtvm_rpc_common common",
         "mlperftiny": "memory common",
+        "fiti_aot_standalone": "memory common",
     }
 
     def _get_platform_version(self, zephyr_base: str) -> float:
