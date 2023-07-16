@@ -1005,6 +1005,8 @@ def _convert_lstm(
     recurrent_weight = etab.new_const(weightList[1].transpose([1, 0]))
     if keras_layer.use_bias:
         in_bias = etab.new_const(weightList[2])
+    if keras_layer.go_backwards:
+        in_data = _op.reverse(in_data, axis=1)
     units = list(weightList[0].shape)[1]
     time_steps = in_shape[1]
     in_data = _op.squeeze(in_data, axis=[0])
@@ -1524,12 +1526,19 @@ def from_keras(model, shape=None, layout="NCHW"):
             raise ValueError("Keras frontend currently supports tensorflow backend only.")
         if keras.backend.image_data_format() != "channels_last":
             raise ValueError("Keras frontend currently supports data_format = channels_last only.")
-        expected_model_class = keras.engine.training.Model
-        if hasattr(keras.engine, "InputLayer"):
-            input_layer_class = keras.engine.InputLayer
+        try:
+            import keras.engine as E
+        except ImportError:
+            try:
+                import keras.src.engine as E
+            except ImportError:
+                raise ImportError("Cannot find Keras's engine")
+        expected_model_class = E.training.Model
+        if hasattr(E, "InputLayer"):
+            input_layer_class = E.InputLayer
         else:
             # TFlite >=2.6
-            input_layer_class = keras.engine.input_layer.InputLayer
+            input_layer_class = E.input_layer.InputLayer
     else:
         # Importing from Tensorflow Keras (tf.keras)
         try:
